@@ -256,23 +256,27 @@ async function loadPayerPerformance(payer) {
     hideLoading();
     const data = await res.json();
     if (data.error) throw new Error(data.error);
-    document.getElementById('dashboardContent').classList.remove('hidden');
+    const dc = document.getElementById('dashboardContent');
+    if (dc) dc.classList.remove('hidden');
     renderSummaryCards(data);
     renderImpactBanner(data);
     renderQuickWins(data);
     renderMetricsTable(data.metrics);
   } catch (err) {
     hideLoading();
-    alert(`Could not load performance data: ${err.message}`);
+    console.error('loadPayerPerformance error:', err);
+    alert(`Could not load performance data: ${err.message}\n\nSee browser console (F12) for details.`);
   }
 }
 
 function renderSummaryCards(data) {
   const { star_rating, financial, counts } = data;
+  const sc = document.getElementById('summaryCards');
+  if (!sc) return;
   const starAccent = star_rating >= 4 ? 'teal' : star_rating >= 3.5 ? 'yellow' : 'red';
   const starClass  = star_rating >= 4 ? 'teal' : star_rating >= 3.5 ? 'yellow' : 'red';
   const total = counts.green + counts.yellow + counts.red;
-  document.getElementById('summaryCards').innerHTML = `
+  sc.innerHTML = `
     <div class="summary-card accent-${starAccent}">
       <div class="label">Estimated Star Rating</div>
       <div class="value ${starClass}">${star_rating.toFixed(1)}</div>
@@ -309,7 +313,9 @@ function renderStars(r) {
 
 function renderImpactBanner(data) {
   const { star_rating, financial, counts } = data;
-  document.getElementById('impactBanner').innerHTML = `
+  const ib = document.getElementById('impactBanner');
+  if (!ib) return;
+  ib.innerHTML = `
     You're currently tracking at <strong>${star_rating.toFixed(1)} stars</strong> under your ${esc(data.payer)} contract.
     Closing the <strong>${counts.red} red gap${counts.red !== 1 ? 's' : ''}</strong>
     ${counts.yellow > 0 ? `and addressing the <strong>${counts.yellow} near-miss metric${counts.yellow !== 1 ? 's' : ''}</strong>` : ''}
@@ -321,6 +327,7 @@ function renderImpactBanner(data) {
 
 function renderQuickWins(data) {
   const qw = document.getElementById('quickWins');
+  if (!qw) return;
   const top = data.metrics
     .filter(m => (m.status === 'red' || m.status === 'yellow') && m.current_performance)
     .sort((a, b) => ((b.weight || .5) * Math.abs(b.gap || 0)) - ((a.weight || .5) * Math.abs(a.gap || 0)))
@@ -335,7 +342,7 @@ function renderQuickWins(data) {
     </div>
     <div class="quick-wins-body" id="quickWinsBody"></div>
   `;
-  const body = document.getElementById('quickWinsBody');
+  const body = qw.querySelector('#quickWinsBody');
   top.forEach((m, i) => {
     const p = m.current_performance;
     const gapStr = m.gap != null ? (m.gap >= 0 ? `+${m.gap}pp` : `${m.gap}pp`) : '';
@@ -362,6 +369,7 @@ function renderQuickWins(data) {
 
 function renderMetricsTable(metrics) {
   const tbody = document.getElementById('metricsBody');
+  if (!tbody) return;
   tbody.innerHTML = '';
   metrics.forEach((m, idx) => {
     const status = m.status || 'unknown';
@@ -535,7 +543,14 @@ function appendChatMsg(role, text) {
   const messages = document.getElementById('chatMessages');
   const div = document.createElement('div');
   div.className = `chat-msg ${role}`;
-  div.innerHTML = `<div class="chat-msg-bubble">${escHtml(text)}</div>`;
+  const bubble = document.createElement('div');
+  bubble.className = 'chat-msg-bubble';
+  if (role === 'assistant') {
+    bubble.innerHTML = markdownToHtml(text);
+  } else {
+    bubble.textContent = text;
+  }
+  div.appendChild(bubble);
   messages.appendChild(div);
   messages.scrollTop = messages.scrollHeight;
   return div;
@@ -567,9 +582,36 @@ function esc(str) {
   return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// Slightly richer escaping for chat (preserve newlines as <br>)
-function escHtml(str) {
-  return esc(str).replace(/\n/g, '<br>');
+// Markdown → HTML for assistant chat messages
+function markdownToHtml(str) {
+  if (!str) return '';
+  let s = esc(str);
+  // Bold: **text**
+  s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+  // Italic: *text* (single asterisk, not bold)
+  s = s.replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '<em>$1</em>');
+  // Inline code: `code`
+  s = s.replace(/`([^`\n]+)`/g, '<code style="background:#1e2d3d;padding:1px 5px;border-radius:3px;font-size:0.85em">$1</code>');
+  // Lists: lines starting with "- " or "* " or "• "
+  const lines = s.split('\n');
+  const out = [];
+  let inList = false;
+  for (const line of lines) {
+    const m = line.match(/^[-•]\s+(.+)/);
+    if (m) {
+      if (!inList) { out.push('<ul style="margin:6px 0 6px 16px;padding:0;line-height:1.6">'); inList = true; }
+      out.push(`<li>${m[1]}</li>`);
+    } else {
+      if (inList) { out.push('</ul>'); inList = false; }
+      out.push(line);
+    }
+  }
+  if (inList) out.push('</ul>');
+  s = out.join('\n');
+  // Paragraph breaks and line breaks
+  s = s.replace(/\n\n+/g, '<br><br>');
+  s = s.replace(/\n/g, '<br>');
+  return s;
 }
 
 function showLoading(msg) {
@@ -580,20 +622,4 @@ function hideLoading() {
   document.getElementById('loadingOverlay').classList.add('hidden');
 }
 
-// ── Init ──────────────────────────────────────────────────────────────────
-
-(async function init() {
-  try {
-    const res  = await fetch(API.payers);
-    const data = await res.json();
-    if (data.payers.length) {
-      data.payers.forEach(p => { parsedPayers[p.key] = p; });
-      refreshPayerTabs();
-      document.getElementById('section-dashboard').classList.remove('hidden');
-      document.getElementById('sectionDivider').classList.remove('hidden');
-      collapseParseSection();
-      currentPayer = data.payers[0].key;
-      loadPayerPerformance(currentPayer);
-    }
-  } catch (e) { /* server not ready */ }
-})();
+// No auto-load on init — every page load starts with the upload view only.
