@@ -1,0 +1,6 @@
+flask==3.0.3
+google-genai>=1.0.0
+pdfplumber==0.11.4
+pandas==2.2.3
+numpy==1.26.4
+python-dotenv==1.0.1

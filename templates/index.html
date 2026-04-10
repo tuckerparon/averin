@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Averin Insights™</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+  <!-- ── Header ───────────────────────────────────────────────────────── -->
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="brand">
+        <div class="brand-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        </div>
+        <span class="brand-name">Averin Insights<span class="brand-tm">™</span></span>
+      </div>
+      <div class="header-right">
+        <span class="header-tag">Value-Based Care Intelligence</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ── Main ─────────────────────────────────────────────────────────── -->
+  <main>
+    <div class="page-container">
+
+      <!-- ── Section 1: Contract Intelligence ──────────────────────── -->
+      <section class="page-section" id="section-parse">
+        <div class="section-heading">
+          <div class="section-title-group">
+            <h2>Contract Intelligence</h2>
+            <p>Upload your payer VBC contracts. Averin extracts every metric, maps it to your EHR, and flags the exact contract language used.</p>
+          </div>
+          <button class="collapse-btn" id="collapseParseBtn" onclick="toggleParseSection()" title="Collapse section">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"/></svg>
+          </button>
+        </div>
+
+        <div id="parseSectionBody">
+          <!-- Upload zone -->
+          <div class="upload-card">
+            <div class="dropzone" id="dropzone">
+              <div class="drop-icon">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              </div>
+              <p class="drop-title">Drag &amp; drop VBC contracts here</p>
+              <p class="drop-sub">or <label for="fileInput" class="file-label">click to browse</label> &nbsp;·&nbsp; PDF files only &nbsp;·&nbsp; Multiple files accepted</p>
+              <input type="file" id="fileInput" accept=".pdf" multiple style="display:none" />
+            </div>
+          </div>
+
+          <!-- Upload queue -->
+          <div id="uploadQueue" class="upload-queue hidden"></div>
+
+          <!-- Parsed contracts list -->
+          <div id="parsedContracts"></div>
+        </div>
+      </section>
+
+      <!-- ── Section divider ────────────────────────────────────────── -->
+      <div class="section-divider"></div>
+
+      <!-- ── Section 2: Performance Dashboard ──────────────────────── -->
+      <section class="page-section" id="section-dashboard">
+        <div class="section-heading">
+          <div class="section-title-group">
+            <h2>Performance Dashboard</h2>
+            <p>Live performance across all active VBC contracts, calculated from your patient population.</p>
+          </div>
+          <!-- Payer selector inline -->
+          <div id="payerSelector" class="payer-selector-inline hidden">
+            <span class="payer-label">Payer</span>
+            <div id="payerTabs" class="payer-tabs"></div>
+          </div>
+        </div>
+
+        <!-- Empty state -->
+        <div id="noPayers" class="empty-state">
+          <div class="empty-icon">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          </div>
+          <h3>Upload contracts above to activate</h3>
+          <p>Once your payer contracts are parsed, this dashboard will show real-time performance against every quality target.</p>
+        </div>
+
+        <!-- Dashboard content -->
+        <div id="dashboardContent" class="hidden">
+          <div class="summary-row" id="summaryCards"></div>
+          <div class="impact-banner" id="impactBanner"></div>
+          <div class="quick-wins hidden" id="quickWins"></div>
+          <div class="metrics-section">
+            <div class="metrics-header">
+              <h2>All Quality Measures</h2>
+              <div class="legend">
+                <span class="badge green">On Target</span>
+                <span class="badge yellow">Near Miss</span>
+                <span class="badge red">Gap</span>
+                <span class="badge unknown">No Data</span>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="metrics-table">
+                <thead>
+                  <tr>
+                    <th>Metric</th>
+                    <th>Category</th>
+                    <th>Target</th>
+                    <th>Performance</th>
+                    <th>Gap</th>
+                    <th>Weight</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="metricsBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div><!-- /page-container -->
+  </main>
+
+  <!-- ── AI Support Chat ────────────────────────────────────────────── -->
+  <div class="chat-bubble" id="chatBubble" onclick="toggleChat()">
+    <svg id="chatIconOpen" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+    <svg id="chatIconClose" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="display:none"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    <span class="chat-bubble-label" id="chatBubbleLabel">Ask AI</span>
+  </div>
+
+  <div class="chat-panel hidden" id="chatPanel">
+    <div class="chat-panel-header">
+      <div class="chat-panel-brand">
+        <div class="chat-avatar">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        </div>
+        <div>
+          <div class="chat-panel-title">Averin AI</div>
+          <div class="chat-panel-sub">Ask about your VBC performance</div>
+        </div>
+      </div>
+      <button class="chat-close-btn" onclick="toggleChat()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+
+    <div class="chat-messages" id="chatMessages">
+      <div class="chat-msg assistant">
+        <div class="chat-msg-bubble">
+          Hi — I have full visibility into your contract metrics and current performance. Ask me anything: "What's our biggest gap against Humana?" or "How do we improve our star rating?"
+        </div>
+      </div>
+    </div>
+
+    <div class="chat-suggestions" id="chatSuggestions">
+      <button class="chat-suggestion" onclick="sendSuggestion(this)">What's our biggest care gap?</button>
+      <button class="chat-suggestion" onclick="sendSuggestion(this)">How can we improve our star rating?</button>
+      <button class="chat-suggestion" onclick="sendSuggestion(this)">Which payer contract is most favorable?</button>
+    </div>
+
+    <div class="chat-input-row">
+      <input type="text" class="chat-input" id="chatInput" placeholder="Ask about your performance…" />
+      <button class="chat-send-btn" id="chatSendBtn" onclick="sendChatMessage()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- ── Loading overlay ────────────────────────────────────────────── -->
+  <div id="loadingOverlay" class="loading-overlay hidden">
+    <div class="loading-box">
+      <div class="spinner"></div>
+      <p id="loadingText">Parsing contract…</p>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

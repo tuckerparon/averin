@@ -1,0 +1,9 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+data/parsed_contracts.json
+*.egg-info/
+.venv/
+venv/
