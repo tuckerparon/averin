@@ -7,3 +7,4 @@ data/parsed_contracts.json
 *.egg-info/
 .venv/
 venv/
+.vercel
