@@ -460,6 +460,17 @@ Guidelines:
 
 # ── Flask routes ──────────────────────────────────────────────────────────────
 
+# Ensure unhandled exceptions return JSON (not Vercel's HTML error pages)
+@app.errorhandler(Exception)
+def handle_exception(e):
+    import traceback
+    return jsonify({"error": str(e), "trace": traceback.format_exc()[-500:]}), 500
+
+@app.errorhandler(500)
+def internal_error(e):
+    return jsonify({"error": str(e)}), 500
+
+
 @app.route("/")
 def index():
     return render_template("index.html")

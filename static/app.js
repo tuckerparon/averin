@@ -87,7 +87,16 @@ async function uploadAndParse(file, queueId) {
     showLoading(`Parsing ${file.name} with Gemini AI…`);
     const res  = await fetch(API.parse, { method: 'POST', body: form });
     hideLoading();
-    const data = await res.json();
+    const text = await res.text();
+    let data;
+    try { data = JSON.parse(text); }
+    catch (_) {
+      // Server returned non-JSON (likely a Vercel timeout or crash)
+      const hint = res.status === 504 || text.includes('FUNCTION_INVOCATION_TIMEOUT')
+        ? 'The request timed out — Vercel free plan limits functions to 10s. Upgrade to Pro or try a smaller file.'
+        : `Server returned HTTP ${res.status}. Check Vercel logs for details.`;
+      throw new Error(hint);
+    }
     if (data.error) throw new Error(data.error);
     statusEl.textContent = `Done — ${data.metric_count} metrics`;
     statusEl.className = 'queue-status done';
@@ -254,7 +263,10 @@ async function loadPayerPerformance(payer) {
   try {
     const res  = await fetch(API.performance(payer));
     hideLoading();
-    const data = await res.json();
+    const perfText = await res.text();
+    let data;
+    try { data = JSON.parse(perfText); }
+    catch (_) { throw new Error(`Server returned HTTP ${res.status} — not JSON. Check Vercel logs.`); }
     if (data.error) throw new Error(data.error);
     const dc = document.getElementById('dashboardContent');
     if (dc) dc.classList.remove('hidden');
