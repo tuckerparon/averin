@@ -82,30 +82,14 @@ body {
   height: 60px;
 }
 
-.brand { display: flex; align-items: center; gap: 10px; }
+.brand { display: flex; align-items: center; }
 
-.brand-icon {
-  width: 30px; height: 30px;
-  background: linear-gradient(135deg, var(--teal-500), var(--teal-400));
-  border-radius: 8px;
-  display: flex; align-items: center; justify-content: center;
-  flex-shrink: 0;
-  box-shadow: 0 2px 8px rgba(15,144,128,.35);
-}
-
-.brand-name {
-  font-size: 1.1rem;
-  font-weight: 700;
-  color: #fff;
-  letter-spacing: -0.3px;
-}
-
-.brand-tm {
-  font-size: 0.58rem;
-  vertical-align: super;
-  color: var(--teal-400);
-  font-weight: 500;
-  margin-left: 1px;
+/* White version of logo for dark header */
+.brand-logo {
+  height: 36px;
+  width: auto;
+  display: block;
+  filter: brightness(0) invert(1);
 }
 
 .header-tag {
@@ -671,19 +655,13 @@ table.parse-table tbody tr:hover { background: var(--slate-50); }
   flex-shrink: 0;
 }
 
-.chat-panel-brand { display: flex; align-items: center; gap: 10px; }
+.chat-panel-brand { display: flex; align-items: center; }
 
-.chat-avatar {
-  width: 32px; height: 32px;
-  background: linear-gradient(135deg, var(--teal-500), var(--teal-400));
-  border-radius: 9px;
-  display: flex; align-items: center; justify-content: center;
-  flex-shrink: 0;
-  color: #fff;
+.chat-logo {
+  height: 28px;
+  width: auto;
+  filter: brightness(0) invert(1);
 }
-
-.chat-panel-title { font-size: 0.9rem; font-weight: 700; color: #fff; }
-.chat-panel-sub   { font-size: 0.75rem; color: rgba(255,255,255,.45); margin-top: 1px; }
 
 .chat-close-btn {
   width: 28px; height: 28px;

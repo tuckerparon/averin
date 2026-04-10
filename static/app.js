@@ -94,6 +94,9 @@ async function uploadAndParse(file, queueId) {
     parsedPayers[data.payer] = data;
     renderContractBlock(data.payer, data.metrics);
     refreshPayerTabs();
+    // Reveal dashboard section + divider on first parse
+    document.getElementById('section-dashboard').classList.remove('hidden');
+    document.getElementById('sectionDivider').classList.remove('hidden');
     loadPayerPerformance(data.payer);
     // Collapse upload section once first contract is loaded
     collapseParseSection();
@@ -253,7 +256,6 @@ async function loadPayerPerformance(payer) {
     hideLoading();
     const data = await res.json();
     if (data.error) throw new Error(data.error);
-    document.getElementById('noPayers').classList.add('hidden');
     document.getElementById('dashboardContent').classList.remove('hidden');
     renderSummaryCards(data);
     renderImpactBanner(data);
@@ -587,6 +589,9 @@ function hideLoading() {
     if (data.payers.length) {
       data.payers.forEach(p => { parsedPayers[p.key] = p; });
       refreshPayerTabs();
+      document.getElementById('section-dashboard').classList.remove('hidden');
+      document.getElementById('sectionDivider').classList.remove('hidden');
+      collapseParseSection();
       currentPayer = data.payers[0].key;
       loadPayerPerformance(currentPayer);
     }
