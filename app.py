@@ -38,9 +38,12 @@ def load_cache():
 
 
 def save_cache():
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(PARSED_CACHE, "w") as f:
-        json.dump(parsed_contracts, f, indent=2)
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        with open(PARSED_CACHE, "w") as f:
+            json.dump(parsed_contracts, f, indent=2)
+    except OSError:
+        pass  # Read-only filesystem (e.g. Vercel) — skip persistence
 
 
 # ── Patient data ──────────────────────────────────────────────────────────────
