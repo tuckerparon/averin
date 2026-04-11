@@ -109,8 +109,28 @@ Rules:
 """
 
 
+def _clean_gemini_json(raw: str) -> str:
+    """Best-effort cleanup of Gemini JSON output before parsing."""
+    # Strip markdown fences
+    raw = re.sub(r"^```(?:json)?\s*", "", raw.strip())
+    raw = re.sub(r"\s*```$", "", raw)
+    raw = raw.strip()
+    # If wrapped in an object like {"metrics": [...]} extract the array
+    obj_match = re.search(r'"(?:metrics|data|results|items)"\s*:\s*(\[.*)', raw, re.DOTALL)
+    if obj_match:
+        raw = obj_match.group(1).rstrip().rstrip("}")
+    # Remove trailing commas before ] or }
+    raw = re.sub(r",\s*([\]\}])", r"\1", raw)
+    # Remove JavaScript-style // comments
+    raw = re.sub(r"//[^\n]*", "", raw)
+    return raw
+
+
 def parse_contract_with_gemini(contract_text):
     import time
+    # Truncate very large contracts to avoid token limits (~120k chars ≈ ~30k tokens)
+    if len(contract_text) > 120_000:
+        contract_text = contract_text[:120_000]
     prompt = PARSE_PROMPT.format(contract_text=contract_text)
     last_err = None
     for attempt in range(3):
@@ -120,23 +140,32 @@ def parse_contract_with_gemini(contract_text):
                 contents=prompt,
             )
             raw = response.text.strip()
-            raw = re.sub(r"^```(?:json)?\s*", "", raw)
-            raw = re.sub(r"\s*```$", "", raw)
-            return json.loads(raw)
+            cleaned = _clean_gemini_json(raw)
+            try:
+                return json.loads(cleaned)
+            except json.JSONDecodeError:
+                # Last-ditch: find the JSON array anywhere in the response
+                arr_match = re.search(r'\[.*\]', cleaned, re.DOTALL)
+                if arr_match:
+                    return json.loads(arr_match.group(0))
+                raise json.JSONDecodeError(
+                    f"No valid JSON array found. Raw response (first 400 chars): {raw[:400]}",
+                    cleaned, 0
+                )
         except Exception as e:
             last_err = e
             err_str = str(e)
             if "quota" in err_str.lower() or "rate" in err_str.lower() or "429" in err_str:
-                # Rate-limit: short backoff then retry
                 if attempt < 2:
                     time.sleep(20)
                     continue
-                # Still failing — surface clear guidance
                 raise RuntimeError(
                     "Gemini API quota exceeded. Your API key may lack free-tier quota. "
                     "Please create a new key at https://aistudio.google.com/apikey and "
                     "update the GEMINI_API_KEY in your .env file."
                 ) from e
+            if isinstance(e, json.JSONDecodeError):
+                raise  # Propagate with detail — no point retrying bad JSON
             raise
     raise last_err
 
@@ -446,7 +475,7 @@ def build_chat_context():
     return "\n".join(lines)
 
 
-CHAT_SYSTEM = """You are Averin Insights™ — an AI assistant embedded in a value-based care analytics platform used by hospital executives.
+CHAT_SYSTEM = """You are Averin Insight™ — an AI assistant embedded in a value-based care analytics platform used by hospital executives.
 
 {context}
 

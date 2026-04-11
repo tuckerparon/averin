@@ -82,7 +82,16 @@ body {
   height: 60px;
 }
 
-.brand { display: flex; align-items: center; }
+.brand { display: flex; align-items: center; gap: 2px; }
+.brand-tm {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: rgba(255,255,255,.55);
+  line-height: 1;
+  align-self: flex-start;
+  margin-top: 6px;
+  letter-spacing: 0;
+}
 
 /* White version of logo for dark header */
 .brand-logo {
