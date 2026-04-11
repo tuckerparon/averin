@@ -13,14 +13,18 @@ import pandas as pd
 import pdfplumber
 from google import genai
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, session, redirect, url_for
 
 load_dotenv()
 _gemini = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 app = Flask(__name__)
+app.secret_key = os.getenv("SECRET_KEY", "averin-dev-secret-change-in-prod")
 
 TODAY = datetime(2026, 4, 10)
+
+PORTAL_EMAIL    = os.getenv("PORTAL_EMAIL",    "admin@averin.health")
+PORTAL_PASSWORD = os.getenv("PORTAL_PASSWORD", "averin2026")
 DATA_DIR = "data"
 PARSED_CACHE = os.path.join(DATA_DIR, "parsed_contracts.json")
 
@@ -474,13 +478,42 @@ def internal_error(e):
     return jsonify({"error": str(e)}), 500
 
 
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        email    = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "")
+        if email == PORTAL_EMAIL.lower() and password == PORTAL_PASSWORD:
+            session["authenticated"] = True
+            return redirect(url_for("index"))
+        return render_template("login.html", error="Invalid email or password.")
+    if session.get("authenticated"):
+        return redirect(url_for("index"))
+    return render_template("login.html", error=None)
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+
 @app.route("/")
 def index():
+    if not session.get("authenticated"):
+        return redirect(url_for("login"))
     return render_template("index.html")
+
+
+def require_auth():
+    if not session.get("authenticated"):
+        return jsonify({"error": "Unauthorized"}), 401
+    return None
 
 
 @app.route("/api/payers")
 def get_payers():
+    if (err := require_auth()): return err
     return jsonify(
         {
             "payers": [
@@ -498,6 +531,7 @@ def get_payers():
 
 @app.route("/api/parse-contract", methods=["POST"])
 def parse_contract():
+    if (err := require_auth()): return err
     if "file" not in request.files:
         return jsonify({"error": "No file provided"}), 400
     f = request.files["file"]
@@ -554,6 +588,7 @@ def parse_contract():
 
 @app.route("/api/performance/<payer>")
 def get_performance(payer):
+    if (err := require_auth()): return err
     if payer not in parsed_contracts:
         return jsonify({"error": "Contract not found — parse it first"}), 404
 
@@ -584,6 +619,7 @@ def get_performance(payer):
 
 @app.route("/api/chat", methods=["POST"])
 def chat():
+    if (err := require_auth()): return err
     import time
     body    = request.json or {}
     message = body.get("message", "").strip()
