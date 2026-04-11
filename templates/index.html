@@ -64,48 +64,7 @@
 
       <!-- ── Section 2: Performance Dashboard ──────────────────────── -->
       <section class="page-section hidden" id="section-dashboard">
-        <div class="section-heading">
-          <div class="section-title-group" style="flex:0"></div>
-          <!-- Payer selector inline -->
-          <div id="payerSelector" class="payer-selector-inline hidden">
-            <span class="payer-label">Payer</span>
-            <div id="payerTabs" class="payer-tabs"></div>
-          </div>
-        </div>
-
-        <!-- Dashboard content -->
-        <div id="dashboardContent" class="hidden">
-          <div class="summary-row" id="summaryCards"></div>
-          <div class="impact-banner" id="impactBanner"></div>
-          <div class="quick-wins hidden" id="quickWins"></div>
-          <div class="metrics-section">
-            <div class="metrics-header">
-              <h2>All Quality Measures</h2>
-              <div class="legend">
-                <span class="badge green">On Target</span>
-                <span class="badge yellow">Near Miss</span>
-                <span class="badge red">Gap</span>
-                <span class="badge unknown">No Data</span>
-              </div>
-            </div>
-            <div class="table-wrap">
-              <table class="metrics-table">
-                <thead>
-                  <tr>
-                    <th>Metric</th>
-                    <th>Category</th>
-                    <th>Target</th>
-                    <th>Performance</th>
-                    <th>Gap</th>
-                    <th>Weight</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody id="metricsBody"></tbody>
-              </table>
-            </div>
-          </div>
-        </div>
+        <div id="payerCardsGrid" class="payer-cards-grid"></div>
       </section>
 
     </div><!-- /page-container -->

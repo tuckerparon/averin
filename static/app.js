@@ -102,7 +102,6 @@ async function uploadAndParse(file, queueId) {
     statusEl.className = 'queue-status done';
     parsedPayers[data.payer] = data;
     renderContractBlock(data.payer, data.metrics);
-    refreshPayerTabs();
     // Reveal dashboard section + divider on first parse
     document.getElementById('section-dashboard').classList.remove('hidden');
     document.getElementById('sectionDivider').classList.remove('hidden');
@@ -231,49 +230,20 @@ function toggleParseRow(rowId) {
   btn.classList.toggle('open', !open);
 }
 
-// ── Payer tabs ────────────────────────────────────────────────────────────
-
-function refreshPayerTabs() {
-  const tabs = document.getElementById('payerTabs');
-  const sel  = document.getElementById('payerSelector');
-  const keys = Object.keys(parsedPayers);
-  if (!keys.length) { sel.classList.add('hidden'); return; }
-  sel.classList.remove('hidden');
-  tabs.innerHTML = '';
-  keys.forEach(key => {
-    const btn = document.createElement('button');
-    btn.className = `payer-tab ${key === currentPayer ? 'active' : ''}`;
-    btn.textContent = key;
-    btn.onclick = () => {
-      currentPayer = key;
-      document.querySelectorAll('.payer-tab').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      loadPayerPerformance(key);
-    };
-    tabs.appendChild(btn);
-  });
-}
-
-// ── Performance dashboard ─────────────────────────────────────────────────
+// ── Performance dashboard — payer cards ──────────────────────────────────
 
 async function loadPayerPerformance(payer) {
   currentPayer = payer;
-  refreshPayerTabs();
   showLoading(`Loading ${payer} performance…`);
   try {
-    const res  = await fetch(API.performance(payer));
+    const res      = await fetch(API.performance(payer));
     hideLoading();
     const perfText = await res.text();
     let data;
     try { data = JSON.parse(perfText); }
     catch (_) { throw new Error(`Server returned HTTP ${res.status} — not JSON. Check Vercel logs.`); }
     if (data.error) throw new Error(data.error);
-    const dc = document.getElementById('dashboardContent');
-    if (dc) dc.classList.remove('hidden');
-    renderSummaryCards(data);
-    renderImpactBanner(data);
-    renderQuickWins(data);
-    renderMetricsTable(data.metrics);
+    renderPayerCard(data);
   } catch (err) {
     hideLoading();
     console.error('loadPayerPerformance error:', err);
@@ -281,203 +251,133 @@ async function loadPayerPerformance(payer) {
   }
 }
 
-function renderSummaryCards(data) {
-  const { star_rating, financial, counts } = data;
-  const sc = document.getElementById('summaryCards');
-  if (!sc) return;
-  const starAccent = star_rating >= 4 ? 'teal' : star_rating >= 3.5 ? 'yellow' : 'red';
-  const starClass  = star_rating >= 4 ? 'teal' : star_rating >= 3.5 ? 'yellow' : 'red';
-  const total = counts.green + counts.yellow + counts.red;
-  sc.innerHTML = `
-    <div class="summary-card accent-${starAccent}">
-      <div class="label">Estimated Star Rating</div>
-      <div class="value ${starClass}">${star_rating.toFixed(1)}</div>
-      <div class="stars-text">${renderStars(star_rating)}</div>
-    </div>
-    <div class="summary-card accent-teal">
-      <div class="label">Revenue Opportunity</div>
-      <div class="value teal">$${financial.total_opportunity.toLocaleString()}</div>
-      <div class="sub">Estimated annual uplift</div>
-    </div>
-    <div class="summary-card accent-green">
-      <div class="label">On Target</div>
-      <div class="value green">${counts.green}</div>
-      <div class="sub">of ${total} measured metrics</div>
-    </div>
-    <div class="summary-card accent-yellow">
-      <div class="label">Near Miss</div>
-      <div class="value yellow">${counts.yellow}</div>
-      <div class="sub">within striking distance</div>
-    </div>
-    <div class="summary-card accent-red">
-      <div class="label">Gaps to Close</div>
-      <div class="value red">${counts.red}</div>
-      <div class="sub">below contract target</div>
-    </div>
-  `;
-}
+function renderPayerCard(data) {
+  const grid = document.getElementById('payerCardsGrid');
+  const existing = document.getElementById(`card-${data.payer}`);
+  if (existing) existing.remove();
 
-function renderStars(r) {
-  const filled = Math.floor(r);
-  const half   = (r % 1) >= 0.3;
-  return '★'.repeat(filled) + (half ? '½' : '') + '☆'.repeat(Math.max(0, 5 - filled - (half ? 1 : 0)));
-}
+  const { star_rating, financial, counts, metrics, payer } = data;
 
-function renderImpactBanner(data) {
-  const { star_rating, financial, counts } = data;
-  const ib = document.getElementById('impactBanner');
-  if (!ib) return;
-  ib.innerHTML = `
-    You're currently tracking at <strong>${star_rating.toFixed(1)} stars</strong> under your ${esc(data.payer)} contract.
-    Closing the <strong>${counts.red} red gap${counts.red !== 1 ? 's' : ''}</strong>
-    ${counts.yellow > 0 ? `and addressing the <strong>${counts.yellow} near-miss metric${counts.yellow !== 1 ? 's' : ''}</strong>` : ''}
-    could move you to <strong>${financial.potential_stars.toFixed(1)} stars</strong> —
-    approximately <strong>$${financial.total_opportunity.toLocaleString()}</strong> in additional quality bonuses
-    and shared savings annually (based on ~${financial.ma_patients_assumed} Medicare Advantage attributed members).
-  `;
-}
+  // Stars
+  const filled = Math.floor(star_rating);
+  const half   = (star_rating % 1) >= 0.3;
+  const empty  = Math.max(0, 5 - filled - (half ? 1 : 0));
+  const stars  = '★'.repeat(filled) + (half ? '½' : '') + '☆'.repeat(empty);
 
-function renderQuickWins(data) {
-  const qw = document.getElementById('quickWins');
-  if (!qw) return;
-  const top = data.metrics
-    .filter(m => (m.status === 'red' || m.status === 'yellow') && m.current_performance)
-    .sort((a, b) => ((b.weight || .5) * Math.abs(b.gap || 0)) - ((a.weight || .5) * Math.abs(a.gap || 0)))
-    .slice(0, 3);
+  // Status chips
+  const chips = [
+    counts.red    ? `<span class="card-chip red">● ${counts.red} failing</span>` : '',
+    counts.yellow ? `<span class="card-chip yellow">● ${counts.yellow} at risk</span>` : '',
+    counts.green  ? `<span class="card-chip green">● ${counts.green} on track</span>` : '',
+  ].join('');
 
-  if (!top.length) { qw.classList.add('hidden'); return; }
-  qw.classList.remove('hidden');
-  qw.innerHTML = `
-    <div class="quick-wins-header">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-      Top Improvement Opportunities
-    </div>
-    <div class="quick-wins-body" id="quickWinsBody"></div>
-  `;
-  const body = qw.querySelector('#quickWinsBody');
-  top.forEach((m, i) => {
-    const p = m.current_performance;
-    const gapStr = m.gap != null ? (m.gap >= 0 ? `+${m.gap}pp` : `${m.gap}pp`) : '';
-    const gapCol = m.gap != null && m.gap < 0 ? '#B91C1C' : '#15803D';
-    const impact = m.weight != null ? `~${(m.weight * 100).toFixed(0)}% of score` : 'High priority';
-    const act    = actionsArray(m.improvement_actions)[0] || '';
-    const el = document.createElement('div');
-    el.className = 'quick-win-item';
-    el.innerHTML = `
-      <div class="win-rank">${i + 1}</div>
-      <div class="win-content">
-        <div class="win-name">${esc(m.metric_name)}</div>
-        <div class="win-detail">
-          Current: <strong>${p.current_value}%</strong> &nbsp;→&nbsp; Target: <strong>${m.target_display || m.target_value + '%'}</strong>
-          &nbsp;<span style="color:${gapCol};font-weight:700">${gapStr}</span>
+  // Opportunity
+  const opp = financial.total_opportunity;
+  const oppStr = opp >= 1000000 ? `$${(opp/1000000).toFixed(1)}M`
+               : opp >= 1000    ? `$${Math.round(opp/1000)}K`
+               : opp > 0        ? `$${opp.toLocaleString()}`
+               : '$0';
+
+  const starColor = star_rating >= 4 ? 'var(--teal-500)' : star_rating >= 3 ? '#F59E0B' : 'var(--red-mid)';
+
+  const card = document.createElement('div');
+  card.className = 'payer-card';
+  card.id = `card-${payer}`;
+  card.innerHTML = `
+    <div class="payer-card-head">
+      <div class="payer-card-left">
+        <div class="payer-card-name">${esc(payer)}</div>
+        <div class="payer-card-stars" style="color:${starColor}">${stars}
+          <span class="payer-star-num">${star_rating.toFixed(1)}</span>
         </div>
-        ${act ? `<div class="win-detail text-muted" style="margin-top:3px">💡 ${esc(act)}</div>` : ''}
       </div>
-      <span class="win-impact">${impact}</span>
-    `;
-    body.appendChild(el);
-  });
-}
+      <div class="payer-card-right">
+        <div class="payer-card-opp">${oppStr}</div>
+        <div class="payer-card-opp-label">potential opportunity</div>
+      </div>
+    </div>
+    <div class="payer-card-chips">${chips}</div>
+    <table class="payer-card-table">
+      <thead>
+        <tr>
+          <th>Measure</th>
+          <th>Target</th>
+          <th>Performance</th>
+          <th>Gap (pp)</th>
+        </tr>
+      </thead>
+      <tbody id="card-tbody-${payer}"></tbody>
+    </table>
+  `;
+  grid.appendChild(card);
 
-function renderMetricsTable(metrics) {
-  const tbody = document.getElementById('metricsBody');
-  if (!tbody) return;
-  tbody.innerHTML = '';
-  metrics.forEach((m, idx) => {
+  // Sort: red → yellow → green → unknown
+  const order = { red: 0, yellow: 1, green: 2, unknown: 3 };
+  const sorted = [...metrics].sort((a, b) => (order[a.status] ?? 3) - (order[b.status] ?? 3));
+
+  const tbody = document.getElementById(`card-tbody-${payer}`);
+  sorted.forEach((m, idx) => {
+    const rowId  = `${payer}-${idx}`;
     const status = m.status || 'unknown';
-    const rowId  = `dash-${idx}`;
-    const gapVal = m.gap != null
-      ? `<span class="${m.gap >= 0 ? 'gap-positive' : m.gap >= -10 ? 'gap-warn' : 'gap-negative'}">${m.gap >= 0 ? '+' : ''}${m.gap}pp</span>`
-      : '<span class="gap-neutral">—</span>';
+    const val    = m.current_performance?.current_value;
+    const tgt    = m.target_display || (m.target_value != null ? m.target_value + '%' : '—');
+    const gap    = m.gap != null ? (m.gap >= 0 ? `+${m.gap}` : `${m.gap}`) : '—';
 
     const tr = document.createElement('tr');
-    tr.className = `data-row status-${status}`;
-    tr.onclick = () => toggleDashRow(rowId);
+    tr.className = 'payer-card-row';
+    tr.onclick = () => toggleCardRow(rowId);
     tr.innerHTML = `
-      <td class="metric-name-cell">${esc(m.metric_name)}</td>
-      <td><span class="cat-badge">${esc(m.category || '—')}</span></td>
-      <td class="fw-600">${esc(m.target_display || (m.target_value != null ? m.target_value + '%' : '—'))}</td>
-      <td class="perf-cell">${buildProgressCell(m, status)}</td>
-      <td>${gapVal}</td>
-      <td class="weight-val">${m.weight != null ? (m.weight * 100).toFixed(0) + '%' : '—'}</td>
-      <td><span class="status-badge ${status}">${statusLabel(status)}</span></td>
+      <td class="card-metric-name">${esc(m.metric_name)}</td>
+      <td class="card-tgt">${esc(tgt)}</td>
+      <td class="card-perf-cell">${val != null
+        ? `<span class="perf-pill ${status}">${val}%</span>`
+        : `<span class="perf-pill unknown">—</span>`}</td>
+      <td class="card-gap-cell">${gap}</td>
     `;
     tbody.appendChild(tr);
 
     const detailTr = document.createElement('tr');
-    detailTr.id = `dash-detail-${rowId}`;
+    detailTr.id = `card-detail-${rowId}`;
+    detailTr.className = 'card-detail-row';
     detailTr.style.display = 'none';
-    detailTr.innerHTML = `<td colspan="7">${buildDashDetailPanel(m)}</td>`;
+    detailTr.innerHTML = `<td colspan="4">${buildCardDetail(m)}</td>`;
     tbody.appendChild(detailTr);
   });
 }
 
-function buildProgressCell(m, status) {
+function buildCardDetail(m) {
   const perf = m.current_performance;
-  if (!perf || perf.current_value == null) return '<div class="perf-value no-data">No data</div>';
-  const cur = perf.current_value;
-  const tgt = m.target_value;
-  const op  = m.target_operator || '>=';
-  let pct, tgtPct;
-  if (op === '<=' || op === '<') {
-    const scale = Math.max(cur * 1.5, tgt ? tgt * 1.3 : 30, 30);
-    pct    = Math.min(cur / scale * 100, 100);
-    tgtPct = tgt != null ? Math.min(tgt / scale * 100, 100) : null;
-  } else {
-    pct    = Math.min(cur, 100);
-    tgtPct = tgt != null ? Math.min(tgt, 100) : null;
-  }
-  const targetLine = tgtPct != null
-    ? `<div class="progress-target" style="left:${tgtPct}%"></div>` : '';
-  return `
-    <div class="perf-value">${cur}%</div>
-    <div class="progress-wrap">
-      <div class="progress-bar ${status}" style="width:${pct}%"></div>
-      ${targetLine}
-    </div>
-  `;
-}
-
-function buildDashDetailPanel(m) {
-  const perf = m.current_performance;
-  const perfSection = perf
-    ? `<div class="detail-card" style="flex:1.2">
-         <div class="detail-card-label">Current Performance</div>
-         <div class="detail-card-body"><strong>${perf.current_value}%</strong><br>
-           <span class="text-muted text-small">${esc(perf.detail || '')}</span></div>
-       </div>`
-    : `<div class="detail-card" style="flex:1.2">
-         <div class="detail-card-label">Current Performance</div>
-         <div class="detail-card-body text-muted">No EHR data mapped to this metric.</div>
-       </div>`;
+  const perfHtml = perf
+    ? `<div class="cd-block"><div class="cd-label">Current Performance</div>
+       <div class="cd-val"><strong>${perf.current_value}%</strong> — ${esc(perf.detail || '')}</div></div>`
+    : `<div class="cd-block"><div class="cd-label">Current Performance</div>
+       <div class="cd-val text-muted">No EHR data mapped to this metric.</div></div>`;
   const actList = actionsArray(m.improvement_actions);
-  const actions = actList.length ? actList.map(a => `<li>${esc(a)}</li>`).join('') : '<li class="text-muted">—</li>';
+  const actions = actList.length
+    ? actList.map(a => `<li>${esc(a)}</li>`).join('')
+    : '<li class="text-muted">—</li>';
   return `
-    <div style="padding:0 18px 18px">
-      <div class="detail-panel open">
-        ${perfSection}
-        <div class="detail-card" style="flex:2;min-width:280px">
-          <div class="detail-card-label">Contract Source</div>
-          <div class="detail-card-body">
-            <blockquote class="source-quote">${esc(m.source_text || 'No source text available.')}</blockquote>
-          </div>
-        </div>
-        <div class="detail-card" style="flex:1.4;min-width:210px">
-          <div class="detail-card-label">EHR Data Fields</div>
-          <div class="detail-card-body text-small">${esc(m.ehr_field_mapping || '—')}</div>
-        </div>
-        <div class="detail-card" style="flex:1.4;min-width:210px">
-          <div class="detail-card-label">Clinical Actions</div>
-          <div class="detail-card-body"><ul style="padding-left:16px;line-height:1.65">${actions}</ul></div>
-        </div>
+    <div class="card-detail-panel">
+      ${perfHtml}
+      <div class="cd-block cd-block-wide">
+        <div class="cd-label">Contract Source</div>
+        <blockquote class="source-quote">${esc(m.source_text || 'No source text extracted.')}</blockquote>
+      </div>
+      <div class="cd-block">
+        <div class="cd-label">EHR Data Fields</div>
+        <div class="cd-val">${esc(m.ehr_field_mapping || '—')}</div>
+      </div>
+      <div class="cd-block">
+        <div class="cd-label">Clinical Actions</div>
+        <ul style="padding-left:16px;line-height:1.65;margin:0">${actions}</ul>
       </div>
     </div>
   `;
 }
 
-function toggleDashRow(rowId) {
-  const row = document.getElementById(`dash-detail-${rowId}`);
-  row.style.display = row.style.display !== 'none' ? 'none' : 'table-row';
+function toggleCardRow(rowId) {
+  const row = document.getElementById(`card-detail-${rowId}`);
+  if (row) row.style.display = row.style.display !== 'none' ? 'none' : 'table-row';
 }
 
 // ── Chat support ──────────────────────────────────────────────────────────
