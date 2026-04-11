@@ -55,15 +55,20 @@ fileInput.addEventListener('change', () => {
   if (fileInput.files.length) handleFiles([...fileInput.files]);
 });
 
-function handleFiles(files) {
+// Process sequentially so concurrent Gemini calls don't race/timeout
+async function handleFiles(files) {
   const pdfs = files.filter(f => f.name.toLowerCase().endsWith('.pdf'));
   if (!pdfs.length) { alert('Please upload PDF files.'); return; }
-  pdfs.forEach(enqueueFile);
+  // Add all to queue first so user sees them immediately
+  const items = pdfs.map(f => ({ file: f, id: addToQueue(f) }));
+  for (const { file, id } of items) {
+    await uploadAndParse(file, id);
+  }
 }
 
 // ── Upload queue ──────────────────────────────────────────────────────────
 
-function enqueueFile(file) {
+function addToQueue(file) {
   const queue = document.getElementById('uploadQueue');
   queue.classList.remove('hidden');
   const id = `q-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -75,7 +80,7 @@ function enqueueFile(file) {
     <span class="queue-status pending" id="${id}-status">Queued</span>
   `;
   queue.appendChild(item);
-  uploadAndParse(file, id);
+  return id;
 }
 
 async function uploadAndParse(file, queueId) {
@@ -280,11 +285,26 @@ function renderPayerCard(data) {
 
   const starColor = star_rating >= 4 ? 'var(--teal-500)' : star_rating >= 3 ? '#F59E0B' : 'var(--red-mid)';
 
+  // Card accent color based on star rating
+  const accentColor =
+    star_rating >= 4.5 ? '#16A34A' :
+    star_rating >= 4.0 ? '#22C55E' :
+    star_rating >= 3.5 ? '#0F9080' :
+    star_rating >= 3.0 ? '#F59E0B' :
+    star_rating >= 2.5 ? '#F97316' : '#DC2626';
+  const headerTint =
+    star_rating >= 4.5 ? 'rgba(22,163,74,.05)'  :
+    star_rating >= 4.0 ? 'rgba(34,197,94,.05)'  :
+    star_rating >= 3.5 ? 'rgba(15,144,128,.05)' :
+    star_rating >= 3.0 ? 'rgba(245,158,11,.05)' :
+    star_rating >= 2.5 ? 'rgba(249,115,22,.06)' : 'rgba(220,38,38,.06)';
+
   const card = document.createElement('div');
   card.className = 'payer-card';
   card.id = `card-${payer}`;
+  card.style.borderTop = `4px solid ${accentColor}`;
   card.innerHTML = `
-    <div class="payer-card-head">
+    <div class="payer-card-head" style="background:${headerTint}">
       <div class="payer-card-left">
         <div class="payer-card-name">${esc(payer)}</div>
         <div class="payer-card-stars" style="color:${starColor}">${stars}
@@ -311,12 +331,15 @@ function renderPayerCard(data) {
   `;
   grid.appendChild(card);
 
-  // Sort: red → yellow → green → unknown
+  // Sort: red → yellow → green → unknown; cap unknown (no EHR data) at 1
   const order = { red: 0, yellow: 1, green: 2, unknown: 3 };
   const sorted = [...metrics].sort((a, b) => (order[a.status] ?? 3) - (order[b.status] ?? 3));
+  const known   = sorted.filter(m => m.status !== 'unknown');
+  const unknown = sorted.filter(m => m.status === 'unknown').slice(0, 1);
+  const display = [...known, ...unknown];
 
   const tbody = document.getElementById(`card-tbody-${payer}`);
-  sorted.forEach((m, idx) => {
+  display.forEach((m, idx) => {
     const rowId  = `${payer}-${idx}`;
     const status = m.status || 'unknown';
     const val    = m.current_performance?.current_value;
