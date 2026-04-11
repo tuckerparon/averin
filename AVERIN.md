@@ -1,5 +1,5 @@
 **AVERIN.md**
-for Claude code.
+for Claude Code.
 
 **Problem Statement**
 
