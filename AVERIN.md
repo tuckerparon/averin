@@ -1,7 +1,5 @@
 **AVERIN.md**
 
-For Claude.
-
 **Problem Statement**
 
 Value-based care in America is fragmented and complex. Many health systems do not have the tools and financial resources to implement reliable value-based care programs, and leave billions of dollars on the table. Without a coordinated and agile response, patients suffer with poor outcomes, and providers suffer the administrative burden. Averin plans to change the future of value-based care by reducing provider burden, architecting the first AI value-based care program, and improving patient outcomes.
