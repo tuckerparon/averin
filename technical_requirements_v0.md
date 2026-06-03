@@ -1,7 +1,7 @@
 # Technical Requirements
 
 **Product:** Averin Health: Value-Based Care Contract Intelligence Platform  
-**Stack:** Python, FastAPI, Azure, Microsoft Copilot, Next.js
+**Stack:** Python, FastAPI, Docker, Azure Container Apps, Azure OpenAI Service, Next.js, PostgreSQL + pgvector
 **Last Updated:** 2026-06-03
 
 ---
@@ -19,7 +19,7 @@ Averin Insight allows hospital medical executives to upload their payer Value-Ba
 6. Executive queries the data through an AI chatbot
 
 **User Interface (UI):**
-- Per-payer cards with the official CMS Star Rating (pulled from CMS public data) and total potential opportunity ($)
+- Per-payer cards with the official CMS Star Rating for that plan (pulled from CMS public data) and total potential opportunity ($). Note: CMS assigns star ratings to Medicare Advantage *plans*, not health systems — Averin shows how the health system's clinical performance is moving that plan's rating.
 - Per-metric rows: Measure | Target | Performance | Gap (PP)
 - Status labels: Failing | At Risk | On Track
 - Context for each metric: exact contract source text, EHR data fields needed, clinical action recommendations
@@ -153,7 +153,7 @@ This normalization is critical: it allows cross-payer comparison ("UnitedHealth 
 
 ### 4.1 v0: InterSystems IRIS for Health (Simulated)
 
-InterSystems (hackathon partner) provides IRIS for Health, which exposes a FHIR R4 server. For v0, use **Synthea** to generate realistic synthetic patient population data and load it into IRIS.
+InterSystems provides IRIS for Health, which exposes a FHIR R4 server. For v0, use **Synthea** to generate realistic synthetic patient population data and load it into IRIS.
 
 **Synthea setup:**
 - Generate a population of ~5,000–10,000 synthetic patients
@@ -181,7 +181,7 @@ Metric: Hypertension BP Control
   Step 5: Return {rate, numerator_count, denominator_count, as_of_date}
 ```
 
-**Key design rule: NO patient-level data leaves this layer.** Only aggregated counts and rates are passed upstream. Patient IDs never enter the API layer, metric store, or chatbot context.
+**Note:** Only aggregated counts and rates are passed upstream. Patient IDs never enter the API layer, metric store, or chatbot context.
 
 **Edge cases:**
 - Patient in denominator for multiple payers — counted per-payer independently (correct)
@@ -203,38 +203,62 @@ Metric: Hypertension BP Control
 
 The "POTENTIAL OPPORTUNITY" dollar figure shown per payer represents two distinct types of value:
 
-**Type 1 — Closeable gap:** Performance is below target but achievable. Clinical interventions can close the gap and capture the bonus.
+**Type 1 — Closeable gap:** Performance is below target but achievable. Clinical interventions can close the gap and capture the bonus. Flagged as `CLOSEABLE`.
 
-**Type 2 — Negotiation target:** The gap is so large relative to the hospital's patient population that the target is likely unrealistic. The executive's play is to negotiate a lower target, not chase an impossible clinical improvement. Example: if a hospital serves a high-risk urban population and hypertension prevalence is 3x the national average, a payer-mandated 72% BP control target may be structurally unachievable regardless of care quality. Averin surfaces this so the executive can walk into a renegotiation with data.
+**Type 2 — Negotiation target:** The gap is so large relative to the hospital's patient population that the target is likely unrealistic. The executive's play is to negotiate a lower target, not chase an impossible clinical improvement. Example: if a hospital serves a high-risk urban population and hypertension prevalence is 3x the national average, a payer-mandated 72% BP control target may be structurally unachievable regardless of care quality. Averin surfaces this so the executive can walk into a renegotiation with data. Flagged as `NEGOTIATE`.
 
-The system should flag each metric as `CLOSEABLE` or `NEGOTIATE` based on the magnitude of the gap and population characteristics (to be defined with public health experts).
+The `CLOSEABLE` vs. `NEGOTIATE` threshold should be defined with public health experts — a reasonable starting point is gap > 30pp, but population risk adjustment matters.
 
-### 5.1 Inputs
-- Gap in percentage points per metric
-- Estimated patient population size (denominator count)
-- Per-member-per-year (PMPY) bonus or penalty rate from contract
-- Tier structure (if tiered bonuses apply)
+### 5.1 Payment Models
 
-### 5.2 Calculation (simplified v0)
+VBC contracts pay health systems in several different ways. Averin stores a `payment_model` per contract and applies different opportunity calculations accordingly:
+
+| Payment Model | How it Works | Opportunity Calculation |
+|---------------|--------------|------------------------|
+| **Quality bonus** | Direct bonus per metric threshold hit | `gap_pp × denominator_count × $/pp` |
+| **Quality withhold** | Payer withholds X% of base fee-for-service payments; returned when targets are met | `withheld_amount × fraction_of_targets_failing` |
+| **Shared savings** | Health system keeps a % of spend saved vs. benchmark; quality score determines the sharing rate | Requires benchmark spend data — flag as estimate, surface sharing rate impact |
+| **CMS Stars indirect** | Higher plan stars → higher CMS payment to MA plan → plan shares more with health system | Shown separately via CMS Stars integration (Section 6) |
+
+For contracts with a `quality_withhold` model, the contract PDF should specify the withhold percentage and which metrics release it. Extract these fields alongside the metric targets.
+
+### 5.2 Inputs (per metric)
+- Gap in percentage points
+- Denominator count (patient population in scope)
+- Payment model type (`quality_bonus` | `quality_withhold` | `shared_savings`)
+- Financial parameters: $/pp bonus rate, withhold %, sharing rate — extracted from contract or manually entered
+- Tier structure if applicable
+
+### 5.3 Calculations
+
+**Quality bonus:**
 ```
-opportunity_$ = Σ (gap_pp * denominator_count * value_per_patient_per_pp)
+opportunity_$ = gap_pp × denominator_count × value_per_patient_per_pp
 ```
 
-For v0, `value_per_patient_per_pp` may be estimated or manually entered if not explicit in the contract. Flag metrics where this is estimated.
+**Quality withhold:**
+```
+opportunity_$ = total_withheld_amount × (failing_metrics / total_withhold_metrics)
+```
 
-### 5.3 Edge cases
-- Contracts with shared savings models (percentage of savings, not per-metric bonuses) — different calculation
-- Contracts with quality withholds (penalty if below threshold) vs. bonus-only
-- Metrics where performance already exceeds target — gap is 0, opportunity is $0 (but flag "at risk of regression")
-- NEGOTIATE vs. CLOSEABLE threshold — needs definition (e.g., gap > 30pp triggers negotiation flag)
+**Shared savings (estimate only):**
+```
+opportunity_$ = estimated_savings × (current_sharing_rate_delta)
+-- Surface as estimate; requires benchmark spend data not available from EHR
+```
+
+### 5.4 Edge Cases
+- Metrics where performance already exceeds target — gap is $0, but flag as "at risk of regression"
+- Tiered bonuses — compute opportunity at each tier separately, sum if achievable
+- Same metric covered by multiple payment mechanisms in one contract — sum contributions
+- `value_per_patient_per_pp` not explicit in contract — flag as estimated, allow manual override
 
 ---
 
 ## 6. API Layer
 
 ### 6.1 Technology
-- **v0:** Azure Functions (Python) or FastAPI on Azure App Service
-- **Future:** Containerized (Docker + Azure Container Apps)
+- FastAPI (Python) in Docker, deployed to Azure Container Apps
 
 ### 6.2 Core Endpoints
 
@@ -283,40 +307,75 @@ It will ONLY contain:
 - **Retrieval:** pgvector cosine similarity search on user query embedding -> top-k chunks -> stuffed into GPT-4o context
 - **Model:** Azure OpenAI Service (GPT-4o)
 
-### 7.3 Suggested Prompts (from mockup)
+### 7.3 Suggested Prompts
 - "What's our biggest care gap?"
 - "How can we improve our star rating?"
 - "Which payer contract is most favorable?"
 - "What's our biggest gap against Humana?"
 
 ### 7.4 Clinical Actions Generation
-Each metric drill-down shows pre-generated clinical actions. These are generated at sync time (not on-demand) by prompting GPT-4o with:
+Each metric drill-down shows pre-generated clinical actions. These are generated at each nightly EHR sync by prompting GPT-4o with:
 - The metric definition and current gap
 - Evidence-based guideline references (pre-loaded context, NOT patient data)
 - The EHR fields involved
 
 Example output: "Standardize blood pressure measurement protocols across clinics", "Implement team-based care models including nurses and pharmacists for hypertension management"
 
-These are cached and refreshed when performance data changes significantly.
+Clinical actions are regenerated on every nightly sync. At current scale this is trivial; revisit if regeneration time becomes a bottleneck.
 
 ---
 
 ## 8. Data Storage
 
 ### 8.1 Primary Database
-- **PostgreSQL + pgvector on Azure Database for PostgreSQL**
-- Handles all structured data (contracts, metrics, performance, gaps, chat history) AND vector embeddings for chatbot RAG (contract text chunks)
-- pgvector adds a `vector` column type and cosine similarity search — no separate vector database needed
-- Single database simplifies operations, reduces cost, and keeps all queries in one place
+- **PostgreSQL + pgvector on Azure Database for PostgreSQL Flexible Server**
+- Single database handles all structured data (contracts, metrics, performance, gaps, chat history) AND vector embeddings for chatbot RAG (contract text chunks)
+- pgvector adds a `vector` column type with cosine similarity search — no separate vector database needed
+- Keeps all queries in one place; simplifies ops and reduces cost
 
 ### 8.2 Schema (PostgreSQL)
 
+Multiple tables — each piece of data stored once, joined when needed. Merging into one table would mean repeating the full metric definition on every performance row.
+
+`performance` and `gaps` are merged into one table since a gap is always derived from a performance record.
+
 ```sql
-contracts (id, payer_name, upload_date, blob_url, extraction_status, extraction_confidence_avg)
-metrics (id, contract_id, measure_name, measure_code, standard_code, target_value, target_operator, target_unit, measurement_period, denominator_definition, numerator_definition, exclusion_criteria_json, icd10_codes_json, loinc_codes_json, contract_source_text, financial_weight_pp, extraction_confidence)
-contract_chunks (id, contract_id, metric_id, chunk_text, chunk_metadata_json, embedding vector(1536))  -- pgvector: contract text for RAG
-performance (id, metric_id, numerator_count, denominator_count, rate, computed_at, measurement_period_start, measurement_period_end)
-gaps (id, metric_id, gap_pp, status, opportunity_flag, opportunity_dollars, computed_at)  -- opportunity_flag: CLOSEABLE | NEGOTIATE
+contracts (
+  id, payer_name, cms_contract_id, cms_star_rating,
+  payment_model,           -- quality_bonus | quality_withhold | shared_savings
+  payment_model_params_json,  -- withheld_amount, sharing_rate, etc.
+  upload_date, blob_url, extraction_status, extraction_confidence_avg
+)
+
+metrics (
+  id, contract_id,
+  measure_name, measure_code, standard_code,
+  target_value, target_operator, target_unit,
+  measurement_period,
+  denominator_definition, numerator_definition,
+  exclusion_criteria_json, icd10_codes_json, loinc_codes_json,
+  contract_source_text,
+  financial_weight_pp,
+  extraction_confidence
+)
+
+contract_chunks (
+  id, contract_id, metric_id,
+  chunk_text, chunk_metadata_json,
+  embedding vector(1536)   -- pgvector: for chatbot RAG semantic search
+)
+
+performance_gaps (
+  id, metric_id,
+  numerator_count, denominator_count, rate,
+  gap_pp, status,          -- failing | at_risk | on_track
+  opportunity_flag,        -- CLOSEABLE | NEGOTIATE
+  opportunity_dollars,
+  cms_star_impact,         -- pp distance to next CMS star tier for this measure
+  clinical_actions_json,   -- cached from nightly LLM generation
+  computed_at, measurement_period_start, measurement_period_end
+)
+
 chat_sessions (id, user_id, created_at)
 chat_messages (id, session_id, role, content, created_at)
 ```
@@ -352,7 +411,7 @@ The answer depends on architecture:
 - Microsoft Azure (BAA already available — Azure is HIPAA-eligible)
 - InterSystems IRIS (if hosted by them)
 
-**For v0 with synthetic Synthea data:** No PHI, no HIPAA obligations. Build with HIPAA-compliant architecture anyway (Azure HIPAA-eligible services only) so that moving to production data is a configuration change, not a redesign.
+**For development with synthetic Synthea data:** No PHI, no HIPAA obligations. Architecture uses HIPAA-eligible Azure services throughout so that connecting a production EHR is a configuration change, not a redesign.
 
 ### 9.2 De-identification Standard
 If v1 needs patient-level data for drilling into "which specific patients to intervene on," use HIPAA Safe Harbor de-identification (45 CFR §164.514(b)) — strip the 18 identifiers — before passing any data outside the EHR integration layer.
@@ -363,7 +422,7 @@ For v0, this is out of scope. Executives see population-level rates only.
 - Azure Blob Storage
 - Azure Database for PostgreSQL (with pgvector)
 - Azure OpenAI Service (GPT-4o) — **Microsoft has a BAA for Azure OpenAI Service. Confirm before sending any real patient data.**
-- Azure Functions
+- Azure Container Apps
 - Azure Active Directory
 
 ### 9.4 Security Controls
@@ -469,35 +528,46 @@ GET /fhir/r4/Observation?code=8480-6,8462-4
 
 ## 12. Infrastructure & Deployment
 
-### 12.1 v0 (Hackathon)
-- All on Azure free/trial tier
-- Single region (East US)
-- No HA/redundancy required
-- Manual deployment
+### 12.1 Deployment
+- Docker containers from the start — same image runs locally and in production, no migration needed later
+- Single region (East US) — expand to multi-region when onboarding health systems in other geographies
+- Azure Container Apps: serverless container hosting, scales to zero when idle (cost-effective for early stage)
 
-### 12.2 Resource List
-| Resource | Azure Service |
-|----------|---------------|
-| Frontend | Azure Static Web Apps (or Vercel) |
-| API | Azure App Service B1 (FastAPI) |
-| Database + vectors | Azure Database for PostgreSQL Flexible Server + pgvector extension |
-| File storage | Azure Blob Storage (LRS, cool tier for PDFs) |
-| LLM | Azure OpenAI Service (GPT-4o deployment) |
-| Document AI | Azure AI Document Intelligence (S0 tier) |
-| Cache | Azure Cache for Redis (C0 Basic) |
+### 12.2 Docker Setup
+```
+averin/
+├── backend/
+│   ├── Dockerfile          # Python 3.12, FastAPI, uvicorn
+│   └── docker-compose.yml  # local dev: api + postgres + redis
+├── frontend/
+│   └── (deployed to Vercel — no container needed)
+```
+
+### 12.3 Resource List
+| Resource | Service |
+|----------|---------|
+| Frontend | Vercel |
+| API | Azure Container Apps (FastAPI in Docker) |
+| Container registry | Azure Container Registry |
+| Database + vectors | Azure Database for PostgreSQL Flexible Server + pgvector |
+| File storage | Azure Blob Storage |
+| LLM | Azure OpenAI Service (GPT-4o) |
+| Document AI | Azure AI Document Intelligence |
+| Cache | Azure Cache for Redis |
 | Secrets | Azure Key Vault |
 | Auth | Azure Active Directory B2C |
 | Monitoring | Azure Monitor + Application Insights |
 
-### 12.3 CI/CD
-- GitHub Actions (single repo)
-- On push to `main`: run tests, deploy to Azure
+### 12.4 CI/CD
+- GitHub Actions
+- On push to `main`: build Docker image → push to Azure Container Registry → deploy to Container Apps
+- On push to feature branch: run tests only
 
 ---
 
 ## 13. Repo Structure
 
-**Recommendation: Monorepo for v0.** Simpler to manage, no cross-repo dependency issues, faster to iterate.
+**Monorepo.** Simpler to manage, no cross-repo dependency issues, faster to iterate.
 
 ```
 averin/
