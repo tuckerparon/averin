@@ -1,31 +1,29 @@
-# Averin Insight — Technical Requirements (v0)
+# Technical Requirements
 
-**Product:** Averin Insight — Value-Based Care Intelligence Platform  
-**Version:** v0 (Hackathon / MVP)  
-**Stack:** Azure + Microsoft Copilot (tokens via Harvard HSIL Hackathon)  
-**Future Stack:** GCP + OpenAI or Anthropic  
-**Last Updated:** 2026-05-28
+**Product:** Averin Health: Value-Based Care Contract Intelligence Platform  
+**Stack:** Python, FastAPI, Azure, Microsoft Copilot, Next.js
+**Last Updated:** 2026-06-03
 
 ---
 
 ## 1. Product Overview
 
-Averin Insight allows hospital medical executives to upload their payer Value-Based Care (VBC) contracts, automatically extract every quality metric and target, compare them to live EHR performance data, and quantify the financial opportunity at stake. A chatbot layer lets executives query gaps, trends, and negotiation levers in natural language.
+Averin Insight allows hospital medical executives to upload their payer Value-Based Care (VBC) contracts, automatically extract every quality metric and target, compare them to live EHR performance data, and surface two distinct opportunities: (1) closing performance gaps to capture available bonuses, and (2) identifying gaps so large they signal an unrealistic target — giving executives data-backed leverage to negotiate better terms. A chatbot layer lets executives query gaps, trends, and negotiation levers in natural language.
 
-**Core loop:**
+**Workflow:**
 1. Executive uploads a payer VBC contract (PDF)
 2. System extracts every metric, its target, measurement definition, numerator/denominator logic, and the exact contract language
 3. System pulls the corresponding aggregated metric from the EHR
 4. System computes the gap (performance vs. target) in percentage points
-5. System estimates the financial opportunity tied to closing each gap
+5. System flags each metric as: closeable gap (intervention opportunity) or unrealistic target (negotiation opportunity)
 6. Executive queries the data through an AI chatbot
 
-**From the UI mockup, the product surfaces:**
-- Per-payer cards with a composite star rating and total potential opportunity ($)
+**User Interface (UI):**
+- Per-payer cards with a composite CMS star rating and total potential opportunity ($)
 - Per-metric rows: Measure | Target | Performance | Gap (PP)
 - Status labels: Failing | At Risk | On Track
-- Drill-down per metric: exact contract source text, EHR data fields needed, clinical action recommendations
-- AI chatbot: "What's our biggest care gap?", "How can we improve our star rating?", "Which payer contract is most favorable?"
+- Context for each metric: exact contract source text, EHR data fields needed, clinical action recommendations
+- AI chatbot: Selectable questions ("What's our biggest care gap?", "How can we improve our star rating?", "Which payer contract is most favorable?") and an open input chat window for more specific asks.
 
 ---
 
@@ -37,26 +35,27 @@ Averin Insight allows hospital medical executives to upload their payer Value-Ba
 [User (Browser)]
       |
       v
-[Frontend — React/Next.js]
+[Frontend — Next.js]
       |
       v
-[API Layer — Azure Functions / FastAPI]
+[API Layer — FastAPI on Azure]
       |
       +----> [Contract Pipeline]
       |          Azure Blob Storage (raw PDFs)
-      |          Azure Document Intelligence (PDF parsing)
-      |          Azure OpenAI (term extraction & normalization)
-      |          Azure Cosmos DB / PostgreSQL (structured metrics)
+      |          Azure Document Intelligence (PDF → structured text)
+      |          Azure OpenAI Service (metric extraction & normalization)
+      |          └──> PostgreSQL + pgvector (metrics + contract text vectors)
       |
       +----> [EHR Integration Layer]
-      |          FHIR R4 API (InterSystems IRIS / Epic / Cerner)
-      |          Metric computation engine (aggregation only)
-      |          Cache layer (Azure Redis)
+      |          FHIR R4 API (InterSystems IRIS for v0 / Epic / Cerner in production)
+      |          Metric computation engine (aggregation only — NO patient data leaves)
+      |          Azure Redis (cache for computed rates)
+      |          └──> PostgreSQL (performance + gap data)
       |
       +----> [Chatbot Layer]
-                 Azure OpenAI (GPT-4o via Copilot tokens)
-                 Context: aggregated metrics only, NO PHI
-                 Retrieval: metric store + contract text chunks
+                 Azure OpenAI Service (GPT-4o)
+                 Context: aggregated metrics only, NO PHI ever enters LLM
+                 Retrieval: PostgreSQL metrics + pgvector contract text search
 ```
 
 ### 2.2 Data Flow
@@ -79,8 +78,9 @@ Gap Computation (triggered after EHR sync)
   -> opportunity_$ = gap_pp * estimated_patient_volume * per_pp_financial_weight
 
 Chatbot Query
-  -> RAG over metric store + contract text (aggregated only)
-  -> Azure OpenAI generates response
+  -> pgvector semantic search over contract text chunks
+  -> PostgreSQL query for relevant metric summaries (aggregated only)
+  -> Azure OpenAI Service (GPT-4o) generates response
   -> Response streamed to frontend
 ```
 
@@ -98,7 +98,7 @@ Chatbot Query
 - **Chunking Strategy:** Chunk by section (e.g., "Quality Measures", "Performance Targets") — preserve section headers as metadata for citation
 
 ### 3.3 Metric Extraction (LLM)
-Using Azure OpenAI (GPT-4o) with a structured extraction prompt. Each extracted metric must produce:
+Using Azure OpenAI Service (GPT-4o) with a structured extraction prompt. Each extracted metric must produce:
 
 ```json
 {
@@ -194,7 +194,13 @@ Metric: Hypertension BP Control
 
 ## 5. Financial Opportunity Modeling
 
-The "POTENTIAL OPPORTUNITY" dollar figure shown per payer requires a financial model.
+The "POTENTIAL OPPORTUNITY" dollar figure shown per payer represents two distinct types of value:
+
+**Type 1 — Closeable gap:** Performance is below target but achievable. Clinical interventions can close the gap and capture the bonus.
+
+**Type 2 — Negotiation target:** The gap is so large relative to the hospital's patient population that the target is likely unrealistic. The executive's play is to negotiate a lower target, not chase an impossible clinical improvement. Example: if a hospital serves a high-risk urban population and hypertension prevalence is 3x the national average, a payer-mandated 72% BP control target may be structurally unachievable regardless of care quality. Averin surfaces this so the executive can walk into a renegotiation with data.
+
+The system should flag each metric as `CLOSEABLE` or `NEGOTIATE` based on the magnitude of the gap and population characteristics (to be defined with public health experts).
 
 ### 5.1 Inputs
 - Gap in percentage points per metric
@@ -213,6 +219,7 @@ For v0, `value_per_patient_per_pp` may be estimated or manually entered if not e
 - Contracts with shared savings models (percentage of savings, not per-metric bonuses) — different calculation
 - Contracts with quality withholds (penalty if below threshold) vs. bonus-only
 - Metrics where performance already exceeds target — gap is 0, opportunity is $0 (but flag "at risk of regression")
+- NEGOTIATE vs. CLOSEABLE threshold — needs definition (e.g., gap > 30pp triggers negotiation flag)
 
 ---
 
@@ -261,13 +268,13 @@ It will ONLY contain:
 - Clinical action recommendations (pre-generated)
 
 ### 7.2 RAG Architecture
-- **Vector store:** Azure AI Search (or Azure Cosmos DB with vector index)
+- **Vector store:** PostgreSQL with pgvector extension — stores contract text chunks as vector embeddings alongside all structured metric data. No separate vector database needed.
 - **Indexed documents:**
-  - Contract text chunks (with payer, measure, page metadata)
+  - Contract text chunks (with payer, measure, page metadata + embedding vector)
   - Metric summaries (pre-computed: rate, gap, status, financial opportunity)
   - Clinical guideline summaries (pre-loaded, non-PHI)
-- **Retrieval:** Semantic search on user query -> top-k chunks -> stuffed into GPT-4o context
-- **Model:** Azure OpenAI GPT-4o (via Copilot tokens)
+- **Retrieval:** pgvector cosine similarity search on user query embedding -> top-k chunks -> stuffed into GPT-4o context
+- **Model:** Azure OpenAI Service (GPT-4o)
 
 ### 7.3 Suggested Prompts (from mockup)
 - "What's our biggest care gap?"
@@ -290,17 +297,19 @@ These are cached and refreshed when performance data changes significantly.
 ## 8. Data Storage
 
 ### 8.1 Primary Database
-- **v0:** Azure Cosmos DB (NoSQL) — flexible schema during rapid iteration
-- **Alternative:** PostgreSQL on Azure Database — better for relational queries across metrics
-- **Recommendation:** PostgreSQL — the data is highly relational (contracts -> metrics -> performance -> gaps)
+- **PostgreSQL + pgvector on Azure Database for PostgreSQL**
+- Handles all structured data (contracts, metrics, performance, gaps, chat history) AND vector embeddings for chatbot RAG (contract text chunks)
+- pgvector adds a `vector` column type and cosine similarity search — no separate vector database needed
+- Single database simplifies operations, reduces cost, and keeps all queries in one place
 
 ### 8.2 Schema (PostgreSQL)
 
 ```sql
 contracts (id, payer_name, upload_date, blob_url, extraction_status, extraction_confidence_avg)
 metrics (id, contract_id, measure_name, measure_code, standard_code, target_value, target_operator, target_unit, measurement_period, denominator_definition, numerator_definition, exclusion_criteria_json, icd10_codes_json, loinc_codes_json, contract_source_text, financial_weight_pp, extraction_confidence)
+contract_chunks (id, contract_id, metric_id, chunk_text, chunk_metadata_json, embedding vector(1536))  -- pgvector: contract text for RAG
 performance (id, metric_id, numerator_count, denominator_count, rate, computed_at, measurement_period_start, measurement_period_end)
-gaps (id, metric_id, gap_pp, status, opportunity_dollars, computed_at)
+gaps (id, metric_id, gap_pp, status, opportunity_flag, opportunity_dollars, computed_at)  -- opportunity_flag: CLOSEABLE | NEGOTIATE
 chat_sessions (id, user_id, created_at)
 chat_messages (id, session_id, role, content, created_at)
 ```
@@ -345,11 +354,10 @@ For v0, this is out of scope. Executives see population-level rates only.
 
 ### 9.3 Azure HIPAA-Eligible Services Used
 - Azure Blob Storage
-- Azure Database for PostgreSQL
-- Azure OpenAI (GPT-4o) — **Microsoft has a BAA for Azure OpenAI. Confirm before sending any real patient data.**
+- Azure Database for PostgreSQL (with pgvector)
+- Azure OpenAI Service (GPT-4o) — **Microsoft has a BAA for Azure OpenAI Service. Confirm before sending any real patient data.**
 - Azure Functions
 - Azure Active Directory
-- Azure AI Search
 
 ### 9.4 Security Controls
 - Encryption at rest (Azure default: AES-256)
@@ -464,12 +472,11 @@ GET /fhir/r4/Observation?code=8480-6,8462-4
 | Resource | Azure Service |
 |----------|---------------|
 | Frontend | Azure Static Web Apps (or Vercel) |
-| API | Azure Functions (consumption plan) or Azure App Service B1 |
-| Database | Azure Database for PostgreSQL Flexible Server (Burstable B1) |
+| API | Azure App Service B1 (FastAPI) |
+| Database + vectors | Azure Database for PostgreSQL Flexible Server + pgvector extension |
 | File storage | Azure Blob Storage (LRS, cool tier for PDFs) |
 | LLM | Azure OpenAI Service (GPT-4o deployment) |
 | Document AI | Azure AI Document Intelligence (S0 tier) |
-| Vector search | Azure AI Search (Free tier) |
 | Cache | Azure Cache for Redis (C0 Basic) |
 | Secrets | Azure Key Vault |
 | Auth | Azure Active Directory B2C |
@@ -528,7 +535,7 @@ For v0, you are not training ML models — you are running rules-based metric co
 3. What VBC contract types are in scope? CMS APMs (ACO REACH, MSSP, CMMI models), commercial payer contracts, Medicaid managed care?
 4. How are contracts currently delivered to the hospital? Emailed PDFs, payer portals, physical documents? Are contracts standardized or highly variable?
 5. The "potential opportunity" dollar figure — are financial terms (bonus/penalty per percentage point) always explicit in the contract, or do we need hospitals to manually input them?
-6. Star rating (1–5 shown in mockup) — how is this calculated? Composite of metric statuses? Weighted by financial impact?
+6. Star rating is the official CMS Star Rating (1–5). CMS publishes this annually for Medicare Advantage plans; higher stars = significantly higher bonus payments from CMS. We surface the existing CMS rating per payer and map contract metrics to the specific measures CMS uses to calculate it. Averin does not compute a custom rating — we show the official one and help executives understand which metrics move it.
 7. Will executives want to see trend data over time (are we improving?), or just current snapshot for v0?
 
 ### Technical
