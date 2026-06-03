@@ -1,0 +1,50 @@
+"""Contract extraction prompt and JSON cleanup — ported from app.py."""
+import re
+
+PARSE_PROMPT = """You are a healthcare contract analyst specializing in value-based care (VBC) for hospital systems.
+
+Analyze this payer contract and extract EVERY quality metric, performance measure, and care gap target.
+
+CONTRACT TEXT:
+{contract_text}
+
+Return a JSON array. Each element must have EXACTLY these fields (use JSON null, not the string "null"):
+
+[
+  {{
+    "metric_name": "Clear descriptive name of the quality measure",
+    "category": "One of: Diabetes Management | Cardiovascular | Preventive Screening | Behavioral Health | Medication Adherence | Utilization | Care Coordination",
+    "target_value": 75.0,
+    "target_operator": ">=",
+    "target_display": ">=75%",
+    "weight": 0.15,
+    "calculation_method": "How this metric is calculated (1-2 sentences)",
+    "measurement_period": "Annual",
+    "payer_name": "Payer name from the contract header",
+    "source_text": "EXACT verbatim quote (1-3 sentences) from the contract defining this metric and its target",
+    "source_location": "Section or clause reference if stated (else null)",
+    "ehr_field_mapping": "Specific EHR fields needed — include LOINC codes, ICD-10 codes, CPT codes where applicable",
+    "financial_incentive": "Any bonus, penalty, or shared-savings clause tied to this metric (else null)",
+    "improvement_actions": "2-3 specific clinical actions providers can take to improve performance on this metric"
+  }}
+]
+
+Rules:
+- target_value must be a number (express percentages as 0-100)
+- Extract EVERY measurable performance indicator — be thorough
+- source_text must be copied verbatim from the contract
+- Return ONLY the JSON array — no markdown fences, no explanation text
+"""
+
+
+def clean_llm_json(raw: str) -> str:
+    """Best-effort cleanup of LLM JSON output before parsing."""
+    raw = re.sub(r"^```(?:json)?\s*", "", raw.strip())
+    raw = re.sub(r"\s*```$", "", raw)
+    raw = raw.strip()
+    obj_match = re.search(r'"(?:metrics|data|results|items)"\s*:\s*(\[.*)', raw, re.DOTALL)
+    if obj_match:
+        raw = obj_match.group(1).rstrip().rstrip("}")
+    raw = re.sub(r",\s*([\]\}])", r"\1", raw)
+    raw = re.sub(r"//[^\n]*", "", raw)
+    return raw

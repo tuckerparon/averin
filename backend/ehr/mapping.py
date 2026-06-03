@@ -1,0 +1,36 @@
+"""Map extracted metric names to canonical performance keys — ported from app.py."""
+
+
+def infer_performance_key(metric_name: str) -> str:
+    n = metric_name.lower()
+    if any(k in n for k in ["a1c", "hba1c", "glycemic", "glycated hemoglobin", "diabetes control", "hemoglobin a1"]):
+        return "diabetes_a1c_control"
+    if any(k in n for k in ["blood pressure control", "bp control", "controlling high blood pressure", "hypertension control"]):
+        return "bp_control"
+    if any(k in n for k in ["breast cancer", "mammogram", "mammography", "bcs"]):
+        return "breast_cancer_screening"
+    if any(k in n for k in ["colorectal", "colonoscopy", "colon cancer", "col screen", "crc"]):
+        return "colorectal_screening"
+    if any(k in n for k in ["cervical", "pap smear", "pap test", "ccs"]):
+        return "cervical_screening"
+    if any(k in n for k in ["wellness visit", "preventive visit", "awv", "annual visit", "annual wellness"]):
+        return "annual_wellness_visit"
+    if any(k in n for k in ["depression screen", "phq-9", "phq9", "behavioral health screen", "mental health screen"]):
+        return "depression_screening"
+    if any(k in n for k in ["medication adherence", "med adherence", "proportion days covered", "pdc"]):
+        if any(k in n for k in ["diabetes", "oral hypoglycemic", "insulin", "metformin"]):
+            return "med_adherence_diabetes"
+        if any(k in n for k in ["hypertension", "antihypertensive", "blood pressure med"]):
+            return "med_adherence_hypertension"
+        if any(k in n for k in ["statin", "cholesterol"]):
+            return "med_adherence_statin"
+        return "med_adherence_diabetes"
+    if any(k in n for k in ["statin", "ldl", "cholesterol therapy", "lipid"]):
+        return "statin_therapy"
+    if any(k in n for k in ["readmit", "readmission", "30-day", "30 day"]):
+        return "readmission_rate"
+    if any(k in n for k in ["emergency department", "ed visit", "er visit", "ed util", "avoidable ed"]):
+        return "ed_utilization"
+    if any(k in n for k in ["tobacco", "smoking", "nicotine", "cessation"]):
+        return "tobacco_screening"
+    return "unknown"

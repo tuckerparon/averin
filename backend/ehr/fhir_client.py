@@ -1,0 +1,52 @@
+import os
+import httpx
+from typing import Any
+
+IRIS_BASE = (
+    f"http://{os.environ.get('IRIS_HOST', 'localhost')}:"
+    f"{os.environ.get('IRIS_FHIR_PORT', '52773')}"
+    "/csp/healthshare/averin/fhir/r4"
+)
+IRIS_AUTH = (
+    os.environ.get("IRIS_USER", "_SYSTEM"),
+    os.environ.get("IRIS_PASSWORD", ""),
+)
+
+
+async def fhir_get(resource: str, params: dict[str, Any] | None = None) -> dict:
+    """Execute a FHIR GET request and return the Bundle or resource."""
+    async with httpx.AsyncClient(auth=IRIS_AUTH, timeout=30) as client:
+        resp = await client.get(
+            f"{IRIS_BASE}/{resource}",
+            params=params,
+            headers={"Accept": "application/fhir+json"},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
+def extract_entries(bundle: dict) -> list[dict]:
+    return [e["resource"] for e in bundle.get("entry", []) if "resource" in e]
+
+
+async def get_all_pages(resource: str, params: dict) -> list[dict]:
+    """Follow FHIR pagination to collect all matching resources."""
+    resources = []
+    params = {**params, "_count": 1000}
+    bundle = await fhir_get(resource, params)
+    resources.extend(extract_entries(bundle))
+
+    while True:
+        next_url = next(
+            (l["url"] for l in bundle.get("link", []) if l.get("relation") == "next"),
+            None,
+        )
+        if not next_url:
+            break
+        async with httpx.AsyncClient(auth=IRIS_AUTH, timeout=30) as client:
+            resp = await client.get(next_url, headers={"Accept": "application/fhir+json"})
+            resp.raise_for_status()
+            bundle = resp.json()
+        resources.extend(extract_entries(bundle))
+
+    return resources

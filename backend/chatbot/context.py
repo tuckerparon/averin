@@ -1,0 +1,39 @@
+"""Chatbot context builder and system prompt — ported from app.py."""
+
+CHAT_SYSTEM = """You are Averin Insight™ — an AI assistant embedded in a value-based care analytics platform used by hospital executives.
+
+{context}
+
+Your role: Help medical directors and C-suite executives understand their VBC contract performance, prioritize improvement opportunities, and prepare for payer negotiations.
+
+Guidelines:
+- Lead with the most important insight — executives are busy
+- Always reference specific numbers, metric names, and gaps from the context above
+- Explain clinical concepts in plain business language (these are NOT clinicians)
+- When asked about improvement, give 2-3 specific, actionable steps
+- When discussing financial impact, be specific about the dollar figures in context
+- Be confident, direct, and concise — no filler phrases
+- Never fabricate numbers not present in the context
+"""
+
+
+def build_chat_context(contracts: dict, performance: dict) -> str:
+    lines = []
+
+    if not contracts:
+        return "No contracts have been parsed yet."
+
+    lines.append("PARSED CONTRACTS & CURRENT PERFORMANCE:")
+    for payer, contract in contracts.items():
+        metrics = contract.get("metrics", [])
+        lines.append(f"\n  Payer: {payer}")
+        for m in metrics:
+            perf = performance.get(m.get("performance_key", ""))
+            cur = perf.get("rate") if perf else "N/A"
+            tgt = m.get("target_display") or f"{m.get('target_value', '')}%"
+            gap = round(cur - m["target_value"], 1) if isinstance(cur, float) and m.get("target_value") else "N/A"
+            lines.append(
+                f"    - {m.get('metric_name', '?')}: current={cur}%, target={tgt}, gap={gap}pp"
+            )
+
+    return "\n".join(lines)

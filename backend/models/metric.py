@@ -1,0 +1,37 @@
+import uuid
+from sqlalchemy import String, Float, Text, ForeignKey
+from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.dialects.postgresql import UUID, JSONB
+from .base import Base
+
+
+class Metric(Base):
+    __tablename__ = "metrics"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    contract_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("contracts.id", ondelete="CASCADE"))
+    measure_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    measure_code: Mapped[str | None] = mapped_column(String(50))
+    standard_code: Mapped[str | None] = mapped_column(String(50))
+    target_value: Mapped[float | None] = mapped_column(Float)
+    target_operator: Mapped[str | None] = mapped_column(String(5))
+    target_unit: Mapped[str | None] = mapped_column(String(50))
+    measurement_period: Mapped[str | None] = mapped_column(String(50))
+    denominator_definition: Mapped[str | None] = mapped_column(Text)
+    numerator_definition: Mapped[str | None] = mapped_column(Text)
+    exclusion_criteria: Mapped[list | None] = mapped_column(JSONB)
+    icd10_codes: Mapped[list | None] = mapped_column(JSONB)
+    loinc_codes: Mapped[list | None] = mapped_column(JSONB)
+    contract_source_text: Mapped[str | None] = mapped_column(Text)
+    financial_weight_pp: Mapped[float | None] = mapped_column(Float)
+    extraction_confidence: Mapped[float | None] = mapped_column(Float)
+
+
+class ContractChunk(Base):
+    __tablename__ = "contract_chunks"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    contract_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("contracts.id", ondelete="CASCADE"))
+    metric_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("metrics.id", ondelete="SET NULL"))
+    chunk_text: Mapped[str] = mapped_column(Text, nullable=False)
+    chunk_metadata: Mapped[dict | None] = mapped_column(JSONB)
