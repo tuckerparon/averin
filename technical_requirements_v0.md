@@ -19,7 +19,7 @@ Averin Insight allows hospital medical executives to upload their payer Value-Ba
 6. Executive queries the data through an AI chatbot
 
 **User Interface (UI):**
-- Per-payer cards with a composite CMS star rating and total potential opportunity ($)
+- Per-payer cards with the official CMS Star Rating (pulled from CMS public data) and total potential opportunity ($)
 - Per-metric rows: Measure | Target | Performance | Gap (PP)
 - Status labels: Failing | At Risk | On Track
 - Context for each metric: exact contract source text, EHR data fields needed, clinical action recommendations
@@ -72,10 +72,18 @@ EHR Sync (batch, nightly or on-demand)
   -> Aggregation engine (computes rates, NO patient-level data leaves this layer)
   -> Metric Store (updates performance values)
 
+CMS Stars Sync (annual, on CMS release ~October)
+  -> Pull star ratings CSV from data.cms.gov
+  -> Match payer plan contract ID to payer records
+  -> Store official star rating + measure-level ratings in PostgreSQL
+  -> Map CMS HEDIS measures to extracted contract metrics
+
 Gap Computation (triggered after EHR sync)
   -> gap_pp = performance - target
   -> status = "failing" | "at risk" | "on track"
+  -> opportunity_flag = CLOSEABLE | NEGOTIATE
   -> opportunity_$ = gap_pp * estimated_patient_volume * per_pp_financial_weight
+  -> cms_star_impact = distance from current measure star tier to next tier
 
 Chatbot Query
   -> pgvector semantic search over contract text chunks
@@ -89,8 +97,7 @@ Chatbot Query
 ## 3. Contract Ingestion & Extraction Pipeline
 
 ### 3.1 Input Formats (v0)
-- **Primary:** PDF (drag & drop, multiple files, one per payer)
-- **Future:** Word (.docx), structured payer portals, HL7 FHIR Contract resource
+- PDF (drag & drop, multiple files, one per payer)
 
 ### 3.2 PDF Processing
 - **Storage:** Upload to Azure Blob Storage, generate a unique contract ID
@@ -535,7 +542,7 @@ For v0, you are not training ML models — you are running rules-based metric co
 3. What VBC contract types are in scope? CMS APMs (ACO REACH, MSSP, CMMI models), commercial payer contracts, Medicaid managed care?
 4. How are contracts currently delivered to the hospital? Emailed PDFs, payer portals, physical documents? Are contracts standardized or highly variable?
 5. The "potential opportunity" dollar figure — are financial terms (bonus/penalty per percentage point) always explicit in the contract, or do we need hospitals to manually input them?
-6. Star rating is the official CMS Star Rating (1–5). CMS publishes this annually for Medicare Advantage plans; higher stars = significantly higher bonus payments from CMS. We surface the existing CMS rating per payer and map contract metrics to the specific measures CMS uses to calculate it. Averin does not compute a custom rating — we show the official one and help executives understand which metrics move it.
+6. Star rating is the official CMS Star Rating (1–5). CMS publishes this annually for every Medicare Advantage plan. Averin pulls the official rating from CMS public data and displays it per payer. The value Averin adds is showing *which specific HEDIS clinical measures* (the ~45-50% of the rating computable from EHR data) are dragging the score down, by how much, and what performance level on each measure would be needed to reach the next star tier. The remaining ~50% of the rating (CAHPS patient experience surveys, HOS health outcome surveys) is outside Averin's scope and should be labeled as such in the UI.
 7. Will executives want to see trend data over time (are we improving?), or just current snapshot for v0?
 
 ### Technical
