@@ -10,19 +10,38 @@ router = APIRouter(prefix="/payers", tags=["payers"])
 
 @router.get("")
 async def list_payers(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Contract).order_by(Contract.payer_name))
-    contracts = result.scalars().all()
-    # TODO: join performance_gaps to add opportunity_$ and status counts
-    return [
-        {
+    contracts_result = await db.execute(select(Contract).order_by(Contract.payer_name))
+    contracts = contracts_result.scalars().all()
+
+    payers = []
+    for c in contracts:
+        # Get gap summary for this contract
+        gaps_result = await db.execute(
+            select(PerformanceGap)
+            .join(Metric, PerformanceGap.metric_id == Metric.id)
+            .where(Metric.contract_id == c.id)
+        )
+        gaps = gaps_result.scalars().all()
+
+        total_opportunity = sum(g.opportunity_dollars or 0 for g in gaps)
+        status_counts = {
+            "failing": sum(1 for g in gaps if g.status == "failing"),
+            "at_risk": sum(1 for g in gaps if g.status == "at_risk"),
+            "on_track": sum(1 for g in gaps if g.status == "on_track"),
+        }
+
+        payers.append({
             "id": str(c.id),
             "payer_name": c.payer_name,
             "cms_star_rating": c.cms_star_rating,
             "payment_model": c.payment_model,
             "extraction_status": c.extraction_status,
-        }
-        for c in contracts
-    ]
+            "total_opportunity_dollars": total_opportunity,
+            "metric_counts": status_counts,
+            "last_sync": None,
+        })
+
+    return payers
 
 
 @router.get("/{payer_id}/metrics")
@@ -30,5 +49,38 @@ async def get_payer_metrics(payer_id: UUID, db: AsyncSession = Depends(get_db)):
     contract = await db.get(Contract, payer_id)
     if not contract:
         raise HTTPException(status_code=404, detail="Payer not found")
-    result = await db.execute(select(Metric).where(Metric.contract_id == payer_id))
-    return result.scalars().all()
+
+    metrics_result = await db.execute(
+        select(Metric, PerformanceGap)
+        .outerjoin(PerformanceGap, PerformanceGap.metric_id == Metric.id)
+        .where(Metric.contract_id == payer_id)
+    )
+    rows = metrics_result.all()
+
+    return [
+        {
+            "id": str(m.id),
+            "measure_name": m.measure_name,
+            "measure_code": m.measure_code,
+            "standard_code": m.standard_code,
+            "target_value": m.target_value,
+            "target_operator": m.target_operator,
+            "target_unit": m.target_unit,
+            "measurement_period": m.measurement_period,
+            "extraction_confidence": m.extraction_confidence,
+            "contract_source_text": m.contract_source_text,
+            "icd10_codes": m.icd10_codes,
+            "loinc_codes": m.loinc_codes,
+            "performance": {
+                "rate": g.rate,
+                "numerator_count": g.numerator_count,
+                "denominator_count": g.denominator_count,
+                "gap_pp": g.gap_pp,
+                "status": g.status,
+                "opportunity_flag": g.opportunity_flag,
+                "opportunity_dollars": g.opportunity_dollars,
+                "computed_at": g.computed_at.isoformat() if g.computed_at else None,
+            } if g else None,
+        }
+        for m, g in rows
+    ]

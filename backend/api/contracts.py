@@ -1,17 +1,110 @@
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
+import uuid
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from uuid import UUID
 from db.session import get_db
-from models import Contract, Metric
+from models import Contract, Metric, ContractChunk
+from extraction.pipeline import run_pipeline
 
 router = APIRouter(prefix="/contracts", tags=["contracts"])
 
 
+def _infer_payer(filename: str) -> str:
+    name = filename.lower()
+    if "aetna" in name:
+        return "Aetna"
+    if "humana" in name:
+        return "Humana"
+    if "united" in name:
+        return "UnitedHealth"
+    if "cigna" in name:
+        return "Cigna"
+    if "bcbs" in name or "blue" in name:
+        return "BCBS"
+    if "meridian" in name:
+        return "Meridian"
+    return filename.replace(".pdf", "").replace("_", " ").title()
+
+
+async def _process_contract(contract_id: uuid.UUID, pdf_bytes: bytes, filename: str, payer_name: str):
+    """Background task: run pipeline and write results to DB."""
+    from db.session import AsyncSessionLocal
+    async with AsyncSessionLocal() as db:
+        contract = await db.get(Contract, contract_id)
+        if not contract:
+            return
+        try:
+            contract.extraction_status = "extracting"
+            await db.commit()
+
+            result = await run_pipeline(pdf_bytes, filename, payer_name)
+
+            # Write metrics
+            metric_ids = []
+            for m in result["metrics"]:
+                metric = Metric(
+                    contract_id=contract_id,
+                    measure_name=m.get("metric_name", ""),
+                    measure_code=m.get("measure_code"),
+                    standard_code=m.get("standard_code"),
+                    target_value=m.get("target_value"),
+                    target_operator=m.get("target_operator"),
+                    target_unit=m.get("target_unit", "percent"),
+                    measurement_period=m.get("measurement_period"),
+                    denominator_definition=m.get("denominator_definition") or m.get("calculation_method"),
+                    numerator_definition=m.get("numerator_definition"),
+                    exclusion_criteria=m.get("exclusion_criteria"),
+                    icd10_codes=m.get("icd10_codes"),
+                    loinc_codes=m.get("loinc_codes"),
+                    contract_source_text=m.get("source_text"),
+                    financial_weight_pp=m.get("weight"),
+                    extraction_confidence=m.get("extraction_confidence"),
+                )
+                db.add(metric)
+                await db.flush()
+                metric_ids.append(metric.id)
+
+            # Write chunks
+            for chunk_data in result["chunks"]:
+                chunk = ContractChunk(
+                    contract_id=contract_id,
+                    chunk_text=chunk_data["text"],
+                    chunk_metadata={"filename": filename},
+                )
+                db.add(chunk)
+
+            contract.extraction_status = "complete"
+            contract.extraction_confidence_avg = result["extraction_confidence_avg"]
+            await db.commit()
+
+        except Exception as e:
+            contract.extraction_status = "failed"
+            await db.commit()
+            raise
+
+
 @router.post("")
-async def upload_contract(file: UploadFile = File(...), db: AsyncSession = Depends(get_db)):
-    # TODO: upload to Azure Blob Storage, trigger extraction pipeline
-    raise HTTPException(status_code=501, detail="Contract ingestion pipeline not yet implemented")
+async def upload_contract(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    if not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Must be a PDF file")
+
+    pdf_bytes = await file.read()
+    payer_name = _infer_payer(file.filename)
+
+    contract = Contract(payer_name=payer_name, extraction_status="queued")
+    db.add(contract)
+    await db.commit()
+    await db.refresh(contract)
+
+    background_tasks.add_task(
+        _process_contract, contract.id, pdf_bytes, file.filename, payer_name
+    )
+
+    return {"id": str(contract.id), "payer_name": payer_name, "status": "queued"}
 
 
 @router.get("")
@@ -26,21 +119,39 @@ async def list_contracts(db: AsyncSession = Depends(get_db)):
             "payment_model": c.payment_model,
             "upload_date": c.upload_date.isoformat(),
             "extraction_status": c.extraction_status,
+            "extraction_confidence_avg": c.extraction_confidence_avg,
         }
         for c in contracts
     ]
 
 
 @router.get("/{contract_id}")
-async def get_contract(contract_id: UUID, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Contract).where(Contract.id == contract_id))
-    contract = result.scalar_one_or_none()
+async def get_contract(contract_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    contract = await db.get(Contract, contract_id)
     if not contract:
         raise HTTPException(status_code=404, detail="Contract not found")
-    return contract
+    return {
+        "id": str(contract.id),
+        "payer_name": contract.payer_name,
+        "extraction_status": contract.extraction_status,
+        "extraction_confidence_avg": contract.extraction_confidence_avg,
+        "upload_date": contract.upload_date.isoformat(),
+    }
 
 
 @router.get("/{contract_id}/metrics")
-async def get_contract_metrics(contract_id: UUID, db: AsyncSession = Depends(get_db)):
+async def get_contract_metrics(contract_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Metric).where(Metric.contract_id == contract_id))
-    return result.scalars().all()
+    metrics = result.scalars().all()
+    return [
+        {
+            "id": str(m.id),
+            "measure_name": m.measure_name,
+            "target_value": m.target_value,
+            "target_operator": m.target_operator,
+            "measurement_period": m.measurement_period,
+            "extraction_confidence": m.extraction_confidence,
+            "contract_source_text": m.contract_source_text,
+        }
+        for m in metrics
+    ]

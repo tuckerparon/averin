@@ -2,7 +2,7 @@
 FHIR metric computation engine.
 
 Each function returns:
-  {rate, numerator_count, denominator_count, as_of_date}
+  {rate, numerator_count, denominator_count}
 
 Only aggregated counts leave this module — no patient IDs upstream.
 """
@@ -10,104 +10,129 @@ Only aggregated counts leave this module — no patient IDs upstream.
 from datetime import date, timedelta
 from .fhir_client import get_all_pages
 
-MEASUREMENT_YEAR = date.today().year
-PERIOD_START = f"{MEASUREMENT_YEAR}-01-01"
-PERIOD_END = f"{MEASUREMENT_YEAR}-12-31"
+TODAY = date.today()
+
+# Lookback windows matching HEDIS specs
+ONE_YEAR_AGO   = str(TODAY - timedelta(days=365))
+TWO_YEARS_AGO  = str(TODAY - timedelta(days=730))
+THREE_YEARS_AGO = str(TODAY - timedelta(days=1095))
+TEN_YEARS_AGO  = str(TODAY - timedelta(days=3650))
 
 
 def _rate(numerator: int, denominator: int) -> float | None:
     return round(numerator / denominator * 100, 2) if denominator else None
 
 
-def _dob_cutoff(min_age: int, max_age: int) -> tuple[str, str]:
-    today = date.today()
+def _dob_range(min_age: int, max_age: int) -> tuple[str, str]:
     return (
-        str(today.replace(year=today.year - max_age)),
-        str(today.replace(year=today.year - min_age)),
+        str(TODAY.replace(year=TODAY.year - max_age)),
+        str(TODAY.replace(year=TODAY.year - min_age)),
     )
 
 
 async def bp_control() -> dict:
     """Hypertension: BP Control (<140/90). HEDIS CBP. ICD-10: I10. LOINC: 8480-6, 8462-4."""
-    patients = await get_all_pages("Patient", {
-        "_has:Condition:patient:code": "I10",
-        "birthdate": f"ge{_dob_cutoff(18, 85)[0]}",
+    # Try both with and without system prefix to handle Synthea's coding
+    patients = await get_all_pages("Condition", {
+        "code": "I10",
+        "_count": 1000,
     })
-    denominator = len(patients)
+    patient_ids = list({
+        c.get("subject", {}).get("reference", "").split("/")[-1]
+        for c in patients
+        if c.get("subject", {}).get("reference")
+    })
+    denominator = len(patient_ids)
     if not denominator:
         return {"rate": None, "numerator_count": 0, "denominator_count": 0}
 
-    patient_ids = ",".join(p["id"] for p in patients)
     observations = await get_all_pages("Observation", {
-        "code": "8480-6,8462-4",
-        "patient": patient_ids,
-        "date": f"ge{PERIOD_START}",
-        "_sort": "-date",
+        "code": "55284-4,8480-6,8462-4",
+        "date": f"ge{ONE_YEAR_AGO}",
+        "_count": 1000,
     })
 
-    # Group most recent systolic + diastolic per patient
     systolic: dict[str, float] = {}
     diastolic: dict[str, float] = {}
     for obs in observations:
         pid = obs.get("subject", {}).get("reference", "").split("/")[-1]
+        if pid not in patient_ids:
+            continue
+        # Handle component-based BP observations
+        components = obs.get("component", [])
+        for comp in components:
+            code = comp.get("code", {}).get("coding", [{}])[0].get("code", "")
+            value = comp.get("valueQuantity", {}).get("value")
+            if value is None:
+                continue
+            if code == "8480-6" and pid not in systolic:
+                systolic[pid] = value
+            elif code == "8462-4" and pid not in diastolic:
+                diastolic[pid] = value
+        # Also handle top-level valueQuantity
         code = obs.get("code", {}).get("coding", [{}])[0].get("code", "")
         value = obs.get("valueQuantity", {}).get("value")
-        if value is None:
-            continue
-        if code == "8480-6" and pid not in systolic:
-            systolic[pid] = value
-        elif code == "8462-4" and pid not in diastolic:
-            diastolic[pid] = value
+        if value is not None:
+            if code == "8480-6" and pid not in systolic:
+                systolic[pid] = value
+            elif code == "8462-4" and pid not in diastolic:
+                diastolic[pid] = value
 
     numerator = sum(
-        1 for pid in patients
-        if systolic.get(pid["id"], 999) < 140 and diastolic.get(pid["id"], 999) < 90
+        1 for pid in patient_ids
+        if systolic.get(pid, 999) < 140 and diastolic.get(pid, 999) < 90
     )
     return {"rate": _rate(numerator, denominator), "numerator_count": numerator, "denominator_count": denominator}
 
 
 async def diabetes_a1c_control() -> dict:
     """Diabetes: A1C Control (<8%). HEDIS HbA1c. ICD-10: E11. LOINC: 4548-4."""
-    patients = await get_all_pages("Patient", {"_has:Condition:patient:code": "E11"})
-    denominator = len(patients)
+    conditions = await get_all_pages("Condition", {"code": "E11", "_count": 1000})
+    patient_ids = list({
+        c.get("subject", {}).get("reference", "").split("/")[-1]
+        for c in conditions
+        if c.get("subject", {}).get("reference")
+    })
+    denominator = len(patient_ids)
     if not denominator:
         return {"rate": None, "numerator_count": 0, "denominator_count": 0}
 
-    patient_ids = ",".join(p["id"] for p in patients)
     observations = await get_all_pages("Observation", {
         "code": "4548-4",
-        "patient": patient_ids,
-        "date": f"ge{PERIOD_START}",
-        "_sort": "-date",
+        "date": f"ge{ONE_YEAR_AGO}",
+        "_count": 1000,
     })
 
     latest_a1c: dict[str, float] = {}
     for obs in observations:
         pid = obs.get("subject", {}).get("reference", "").split("/")[-1]
+        if pid not in patient_ids:
+            continue
         value = obs.get("valueQuantity", {}).get("value")
         if value is not None and pid not in latest_a1c:
             latest_a1c[pid] = value
 
-    numerator = sum(1 for pid in patients if latest_a1c.get(pid["id"], 999) < 8.0)
+    numerator = sum(1 for pid in patient_ids if latest_a1c.get(pid, 999) < 8.0)
     return {"rate": _rate(numerator, denominator), "numerator_count": numerator, "denominator_count": denominator}
 
 
 async def breast_cancer_screening() -> dict:
-    """Breast cancer screening. HEDIS BCS. Women 50-74. CPT: 77067."""
-    dob_min, dob_max = _dob_cutoff(50, 74)
+    """Breast cancer screening. HEDIS BCS. Women 50-74. Last 2 years."""
+    dob_min, dob_max = _dob_range(50, 74)
     patients = await get_all_pages("Patient", {
         "gender": "female",
-        "birthdate": f"ge{dob_min}&birthdate=le{dob_max}",
+        "birthdate": f"ge{dob_min}",
+        "_count": 1000,
     })
+    patients = [p for p in patients if p.get("birthDate", "9999") <= dob_max]
     denominator = len(patients)
     if not denominator:
         return {"rate": None, "numerator_count": 0, "denominator_count": 0}
 
-    patient_ids = ",".join(p["id"] for p in patients)
     procedures = await get_all_pages("Procedure", {
-        "code": "77067",
-        "patient": patient_ids,
-        "date": f"ge{PERIOD_START}",
+        "code": "77067,24604007",
+        "date": f"ge{TWO_YEARS_AGO}",
+        "_count": 1000,
     })
     screened = {p.get("subject", {}).get("reference", "").split("/")[-1] for p in procedures}
     numerator = sum(1 for p in patients if p["id"] in screened)
@@ -115,20 +140,21 @@ async def breast_cancer_screening() -> dict:
 
 
 async def colorectal_screening() -> dict:
-    """Colorectal cancer screening. HEDIS COL. Ages 45-75. CPT: 45378."""
-    dob_min, dob_max = _dob_cutoff(45, 75)
+    """Colorectal cancer screening. HEDIS COL. Ages 45-75. Last 10 years."""
+    dob_min, dob_max = _dob_range(45, 75)
     patients = await get_all_pages("Patient", {
-        "birthdate": f"ge{dob_min}&birthdate=le{dob_max}",
+        "birthdate": f"ge{dob_min}",
+        "_count": 1000,
     })
+    patients = [p for p in patients if p.get("birthDate", "9999") <= dob_max]
     denominator = len(patients)
     if not denominator:
         return {"rate": None, "numerator_count": 0, "denominator_count": 0}
 
-    patient_ids = ",".join(p["id"] for p in patients)
     procedures = await get_all_pages("Procedure", {
-        "code": "45378",
-        "patient": patient_ids,
-        "date": f"ge{date.today().replace(year=date.today().year - 10)}",
+        "code": "45378,73761001",
+        "date": f"ge{TEN_YEARS_AGO}",
+        "_count": 1000,
     })
     screened = {p.get("subject", {}).get("reference", "").split("/")[-1] for p in procedures}
     numerator = sum(1 for p in patients if p["id"] in screened)
@@ -136,49 +162,55 @@ async def colorectal_screening() -> dict:
 
 
 async def annual_wellness_visit() -> dict:
-    """Annual Wellness Visit. CPT: G0438, G0439."""
+    """Annual Wellness Visit. Last 12 months."""
     encounters = await get_all_pages("Encounter", {
-        "type": "G0438,G0439",
-        "date": f"ge{PERIOD_START}",
+        "date": f"ge{ONE_YEAR_AGO}",
+        "_count": 1000,
     })
-    patients_with_awv = {
-        e.get("subject", {}).get("reference", "").split("/")[-1] for e in encounters
-    }
-    all_patients = await get_all_pages("Patient", {})
+    # Synthea uses encounter type codes — match wellness/preventive visits
+    awv_types = {"wellness", "preventive", "annual", "G0438", "G0439"}
+    patients_with_awv = set()
+    for e in encounters:
+        type_text = str(e.get("type", [{}])[0].get("text", "")).lower()
+        type_code = e.get("type", [{}])[0].get("coding", [{}])[0].get("code", "")
+        if any(t in type_text for t in awv_types) or type_code in awv_types:
+            pid = e.get("subject", {}).get("reference", "").split("/")[-1]
+            patients_with_awv.add(pid)
+
+    all_patients = await get_all_pages("Patient", {"_count": 1000})
     denominator = len(all_patients)
     numerator = sum(1 for p in all_patients if p["id"] in patients_with_awv)
     return {"rate": _rate(numerator, denominator), "numerator_count": numerator, "denominator_count": denominator}
 
 
 async def depression_screening() -> dict:
-    """Depression screening. HEDIS DSF. PHQ-9. LOINC: 44249-1."""
+    """Depression screening. PHQ-9. LOINC: 44249-1. Last 12 months."""
     observations = await get_all_pages("Observation", {
         "code": "44249-1",
-        "date": f"ge{PERIOD_START}",
+        "date": f"ge{ONE_YEAR_AGO}",
+        "_count": 1000,
     })
-    screened = {
-        o.get("subject", {}).get("reference", "").split("/")[-1] for o in observations
-    }
-    all_patients = await get_all_pages("Patient", {})
+    screened = {o.get("subject", {}).get("reference", "").split("/")[-1] for o in observations}
+    all_patients = await get_all_pages("Patient", {"_count": 1000})
     denominator = len(all_patients)
     numerator = sum(1 for p in all_patients if p["id"] in screened)
     return {"rate": _rate(numerator, denominator), "numerator_count": numerator, "denominator_count": denominator}
 
 
 async def ed_utilization() -> dict:
-    """ED utilization rate per 1000 members. Emergency encounters."""
+    """ED utilization. Emergency encounters last 12 months per 1000 members."""
     ed_encounters = await get_all_pages("Encounter", {
         "class": "EMER",
-        "date": f"ge{PERIOD_START}",
+        "date": f"ge{ONE_YEAR_AGO}",
+        "_count": 1000,
     })
-    all_patients = await get_all_pages("Patient", {})
+    all_patients = await get_all_pages("Patient", {"_count": 1000})
     denominator = len(all_patients)
     numerator = len(ed_encounters)
     rate = round(numerator / denominator * 1000, 1) if denominator else None
     return {"rate": rate, "numerator_count": numerator, "denominator_count": denominator}
 
 
-# Registry — maps metric key to compute function
 METRIC_REGISTRY = {
     "bp_control": bp_control,
     "diabetes_a1c_control": diabetes_a1c_control,
@@ -191,7 +223,6 @@ METRIC_REGISTRY = {
 
 
 async def compute_all() -> dict[str, dict]:
-    """Run all metrics and return results keyed by metric name."""
     results = {}
     for key, fn in METRIC_REGISTRY.items():
         try:

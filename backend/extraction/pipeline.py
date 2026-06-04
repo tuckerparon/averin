@@ -1,0 +1,126 @@
+"""
+Contract ingestion pipeline:
+  PDF -> Azure Document Intelligence -> Gemini (temp) / Azure OpenAI -> PostgreSQL
+"""
+import json
+import os
+import re
+
+from azure.ai.documentintelligence import DocumentIntelligenceClient
+from azure.core.credentials import AzureKeyCredential
+from google import genai
+
+from .prompt import PARSE_PROMPT, clean_llm_json
+
+_doc_client = None
+_gemini_client = None
+
+
+def _get_doc_client() -> DocumentIntelligenceClient:
+    global _doc_client
+    if _doc_client is None:
+        _doc_client = DocumentIntelligenceClient(
+            endpoint=os.environ["AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT"],
+            credential=AzureKeyCredential(os.environ["AZURE_DOCUMENT_INTELLIGENCE_KEY"]),
+        )
+    return _doc_client
+
+
+def _get_gemini_client():
+    global _gemini_client
+    if _gemini_client is None:
+        _gemini_client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    return _gemini_client
+
+
+def extract_text_from_pdf(pdf_bytes: bytes) -> str:
+    """Use Azure Document Intelligence to extract text from a PDF."""
+    client = _get_doc_client()
+    poller = client.begin_analyze_document(
+        "prebuilt-layout",
+        body=pdf_bytes,
+        content_type="application/octet-stream",
+    )
+    result = poller.result()
+    pages = []
+    for page in result.pages:
+        lines = [line.content for line in (page.lines or [])]
+        pages.append("\n".join(lines))
+    return "\n\n".join(pages).strip()
+
+
+def extract_metrics_with_llm(contract_text: str) -> list[dict]:
+    """Use Gemini to extract metrics from contract text (temp until Azure OpenAI quota approved)."""
+    if len(contract_text) > 120_000:
+        contract_text = contract_text[:120_000]
+
+    client = _get_gemini_client()
+    prompt = PARSE_PROMPT.format(contract_text=contract_text)
+    response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
+    raw = response.text.strip()
+    cleaned = clean_llm_json(raw)
+
+    try:
+        metrics = json.loads(cleaned)
+    except json.JSONDecodeError:
+        arr_match = re.search(r'\[.*\]', cleaned, re.DOTALL)
+        if arr_match:
+            metrics = json.loads(arr_match.group(0))
+        else:
+            raise ValueError(f"Could not parse LLM response as JSON: {raw[:400]}")
+
+    return metrics if isinstance(metrics, list) else []
+
+
+def generate_embeddings(texts: list[str]) -> list[list[float]]:
+    """Skip embeddings for now — returns empty list until Azure OpenAI quota approved."""
+    return []
+
+
+def chunk_contract_text(contract_text: str, chunk_size: int = 1000) -> list[str]:
+    """Split contract text into overlapping chunks for RAG."""
+    words = contract_text.split()
+    chunks = []
+    overlap = 100
+    i = 0
+    while i < len(words):
+        chunk = " ".join(words[i:i + chunk_size])
+        chunks.append(chunk)
+        i += chunk_size - overlap
+    return chunks
+
+
+async def run_pipeline(pdf_bytes: bytes, filename: str, payer_name: str) -> dict:
+    """
+    Full pipeline: PDF bytes -> extracted metrics + chunks with embeddings.
+    Returns dict with metrics and chunks ready for DB insertion.
+    """
+    # Step 1: Extract text
+    contract_text = extract_text_from_pdf(pdf_bytes)
+    if len(contract_text) < 100:
+        raise ValueError("Could not extract text — file may be a scanned image PDF")
+
+    # Step 2: Extract metrics
+    from ehr.mapping import infer_performance_key
+    metrics = extract_metrics_with_llm(contract_text)
+    for m in metrics:
+        m["performance_key"] = infer_performance_key(m.get("metric_name", ""))
+
+    # Step 3: Chunk and embed contract text
+    chunks = chunk_contract_text(contract_text)
+    embeddings = generate_embeddings(chunks) if chunks else []
+
+    return {
+        "contract_text": contract_text,
+        "metrics": metrics,
+        "chunks": [
+            {"text": chunk, "embedding": emb}
+            for chunk, emb in zip(chunks, embeddings)
+        ],
+        "extraction_confidence_avg": _avg_confidence(metrics),
+    }
+
+
+def _avg_confidence(metrics: list[dict]) -> float | None:
+    scores = [m.get("extraction_confidence") for m in metrics if m.get("extraction_confidence")]
+    return round(sum(scores) / len(scores), 3) if scores else None

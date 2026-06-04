@@ -1,0 +1,141 @@
+"""
+Gap computation engine.
+
+Joins contract metric targets against FHIR performance rates to produce:
+  gap_pp, status, opportunity_flag, opportunity_dollars
+"""
+
+from datetime import date
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from models import Contract, Metric, PerformanceGap
+from ehr.mapping import infer_performance_key
+
+NEGOTIATE_THRESHOLD_PP = 30.0  # gaps wider than this → NEGOTIATE, not CLOSEABLE
+
+
+def compute_gap(target_value: float, target_operator: str, rate: float) -> float:
+    """Signed gap in percentage points. Negative = failing."""
+    if target_operator in (">=", ">"):
+        return round(rate - target_value, 2)
+    else:  # <= or < (lower is better, e.g. readmission)
+        return round(target_value - rate, 2)
+
+
+def compute_status(gap_pp: float, target_operator: str) -> str:
+    if target_operator in (">=", ">"):
+        if gap_pp >= 0:
+            return "on_track"
+        return "at_risk" if gap_pp >= -10 else "failing"
+    else:
+        if gap_pp >= 0:
+            return "on_track"
+        return "at_risk" if gap_pp >= -15 else "failing"
+
+
+def compute_opportunity_dollars(
+    gap_pp: float,
+    denominator_count: int,
+    financial_weight_pp: float | None,
+    payment_model: str | None,
+) -> float | None:
+    if gap_pp >= 0:
+        return 0.0
+    abs_gap = abs(gap_pp)
+    if financial_weight_pp:
+        return round(abs_gap * denominator_count * financial_weight_pp, 0)
+    # Default estimate: $50/patient/pp for quality bonus
+    if payment_model == "quality_bonus":
+        return round(abs_gap * denominator_count * 50, 0)
+    if payment_model == "quality_withhold":
+        return round(abs_gap * denominator_count * 30, 0)
+    return round(abs_gap * denominator_count * 40, 0)
+
+
+async def run_gap_computation(db: AsyncSession, performance: dict) -> dict:
+    """
+    For each metric in all contracts, join against performance data
+    and write PerformanceGap rows.
+
+    Returns summary: {contract_id: {total_opportunity, failing, at_risk, on_track}}
+    """
+    contracts_result = await db.execute(select(Contract))
+    contracts = contracts_result.scalars().all()
+
+    summary = {}
+
+    for contract in contracts:
+        metrics_result = await db.execute(
+            select(Metric).where(Metric.contract_id == contract.id)
+        )
+        metrics = metrics_result.scalars().all()
+
+        total_opportunity = 0.0
+        counts = {"failing": 0, "at_risk": 0, "on_track": 0, "unknown": 0}
+
+        for metric in metrics:
+            perf_key = infer_performance_key(metric.measure_name)
+            perf = performance.get(perf_key)
+
+            if not perf or perf.get("rate") is None or metric.target_value is None:
+                counts["unknown"] += 1
+                continue
+
+            rate = perf["rate"]
+            target = metric.target_value
+            operator = metric.target_operator or ">="
+            denominator = perf.get("denominator_count", 0)
+
+            gap_pp = compute_gap(target, operator, rate)
+            status = compute_status(gap_pp, operator)
+            opportunity_flag = "NEGOTIATE" if gap_pp < -NEGOTIATE_THRESHOLD_PP else "CLOSEABLE"
+            opportunity_dollars = compute_opportunity_dollars(
+                gap_pp, denominator, metric.financial_weight_pp, contract.payment_model
+            )
+
+            counts[status] += 1
+            if opportunity_dollars:
+                total_opportunity += opportunity_dollars
+
+            # Upsert performance gap
+            existing = await db.execute(
+                select(PerformanceGap).where(PerformanceGap.metric_id == metric.id)
+            )
+            gap_row = existing.scalar_one_or_none()
+
+            if gap_row:
+                gap_row.rate = rate
+                gap_row.numerator_count = perf.get("numerator_count")
+                gap_row.denominator_count = denominator
+                gap_row.gap_pp = gap_pp
+                gap_row.status = status
+                gap_row.opportunity_flag = opportunity_flag
+                gap_row.opportunity_dollars = opportunity_dollars
+                from datetime import datetime
+                gap_row.computed_at = datetime.utcnow()
+            else:
+                from datetime import datetime
+                gap_row = PerformanceGap(
+                    metric_id=metric.id,
+                    rate=rate,
+                    numerator_count=perf.get("numerator_count"),
+                    denominator_count=denominator,
+                    gap_pp=gap_pp,
+                    status=status,
+                    opportunity_flag=opportunity_flag,
+                    opportunity_dollars=opportunity_dollars,
+                    computed_at=datetime.utcnow(),
+                    measurement_period_start=date(date.today().year, 1, 1),
+                    measurement_period_end=date(date.today().year, 12, 31),
+                )
+                db.add(gap_row)
+
+        await db.commit()
+
+        summary[str(contract.id)] = {
+            "payer_name": contract.payer_name,
+            "total_opportunity_dollars": total_opportunity,
+            "metric_counts": counts,
+        }
+
+    return summary
