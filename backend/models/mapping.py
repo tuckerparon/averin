@@ -4,12 +4,12 @@
 # Date generated: 2026-06-04
 #
 # Reviewer: Tucker Paron
-# Review date: _______________
+# Review date: 2026-06-04
 # Changes made during review:
-#   -
+#   - Created this in liu of hardcoded mapping function (best code practices)
 # Comments:
 #
-# Sign-off: _______________
+# Sign-off: Tucker Paron
 # -----------------------------------------------------------
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy import String, Boolean, Integer
