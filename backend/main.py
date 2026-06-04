@@ -15,6 +15,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from api.contracts import router as contracts_router
 from api.payers import router as payers_router
 from api.ehr import router as ehr_router
@@ -52,6 +53,19 @@ async def health():
 async def index():
     """Serve the frontend dashboard."""
     return FileResponse(f"{_templates_dir}/index.html")
+
+class LoginRequest(BaseModel):
+    password: str
+
+
+@app.post("/auth/login")
+async def login(req: LoginRequest):
+    """Validate demo password. Returns a simple token for sessionStorage."""
+    expected = os.environ.get("DEMO_PASSWORD", "averin2026")
+    if req.password != expected:
+        raise HTTPException(status_code=401, detail="Invalid password")
+    return {"token": "averin-demo-authenticated"}
+
 
 @app.get("/demo-contracts/{filename}")
 async def demo_contract(filename: str):

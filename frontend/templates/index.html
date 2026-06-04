@@ -76,6 +76,12 @@
 
       <!-- ── Section 2: Performance Dashboard ──────────────────────── -->
       <section class="page-section hidden" id="section-dashboard">
+        <div class="population-scaler">
+          <label for="populationInput">Attributed member population:</label>
+          <input type="number" id="populationInput" value="10000" min="100" step="500"
+            oninput="rescaleOpportunity()" />
+          <span class="population-hint">Scale opportunity $ to your real patient population</span>
+        </div>
         <div id="payerCardsGrid" class="payer-cards-grid"></div>
       </section>
 
@@ -126,6 +132,20 @@
     <div class="loading-box">
       <div class="spinner"></div>
       <p id="loadingText">Parsing contract…</p>
+    </div>
+  </div>
+
+  <!-- ── Login overlay ─────────────────────────────────────────────────── -->
+  <div id="loginOverlay" class="login-overlay hidden">
+    <div class="login-box">
+      <img src="/static/logo.png" alt="Averin Insight™" class="login-logo" />
+      <h2 class="login-title">Averin Insight™ <span class="beta-badge">BETA</span></h2>
+      <p class="login-sub">Value-Based Care Intelligence</p>
+      <form onsubmit="submitLogin(event)">
+        <input type="password" id="loginPassword" class="login-input" placeholder="Enter access password" autofocus />
+        <p class="login-error hidden" id="loginError">Incorrect password.</p>
+        <button type="submit" class="login-btn">Sign in</button>
+      </form>
     </div>
   </div>
 

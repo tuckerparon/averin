@@ -1,6 +1,36 @@
 /* ── Averin Insights — single-page app ───────────────────────────────────── */
 /* Updated 2026-06-04: wired to FastAPI backend (localhost:8000)              */
 
+// ── Auth gate ─────────────────────────────────────────────────────────────
+
+(function checkAuth() {
+  if (!sessionStorage.getItem('averin-token')) {
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('loginOverlay').classList.remove('hidden');
+    });
+  }
+})();
+
+async function submitLogin(e) {
+  e.preventDefault();
+  const pw = document.getElementById('loginPassword').value;
+  const errEl = document.getElementById('loginError');
+  errEl.classList.add('hidden');
+  try {
+    const res = await fetch(`${API_BASE}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pw }),
+    });
+    if (!res.ok) { errEl.classList.remove('hidden'); return; }
+    const { token } = await res.json();
+    sessionStorage.setItem('averin-token', token);
+    document.getElementById('loginOverlay').classList.add('hidden');
+  } catch (_) {
+    errEl.classList.remove('hidden');
+  }
+}
+
 const API_BASE = 'http://localhost:8000';
 
 const API = {
@@ -18,6 +48,24 @@ const API = {
 let contractIndex = {};
 let currentPayerId = null;
 let chatHistory = [];
+
+// Raw payer data keyed by contractId — used for rescaling
+let _payerDataCache = {};
+
+function getPopulation() {
+  return parseInt(document.getElementById('populationInput')?.value || '10000', 10);
+}
+
+function scaleOpportunity(rawDollars, denominator) {
+  if (!rawDollars || !denominator) return rawDollars;
+  const pop = getPopulation();
+  return Math.round(rawDollars * (pop / denominator));
+}
+
+function rescaleOpportunity() {
+  // Re-render all cached payer cards with new population scale
+  Object.values(_payerDataCache).forEach(data => renderPayerCard(data));
+}
 
 // ── Field normalization helpers ────────────────────────────────────────────
 
@@ -145,7 +193,6 @@ async function uploadAndParse(file, queueId) {
     statusEl.className = 'queue-status done';
 
     contractIndex[contractId] = payerName;
-    renderContractBlock(contractId, payerName, metrics);
 
     document.getElementById('section-dashboard').classList.remove('hidden');
     document.getElementById('sectionDivider').classList.remove('hidden');
@@ -313,7 +360,7 @@ async function loadPayerPerformance(contractId, payerName) {
     const metrics = await metricsRes.json();
     const summary = payers.find(p => p.id === contractId) || {};
 
-    renderPayerCard({
+    const payerData = {
       payer:       payerName,
       contractId,
       star_rating: 3.5,  // Placeholder — CMS Stars integration pending (Phase 5)
@@ -329,14 +376,17 @@ async function loadPayerPerformance(contractId, payerName) {
         target_value:        m.target_value,
         source_text:         m.contract_source_text,
         ehr_field_mapping:   buildEhrFields(m),
-        improvement_actions: [],  // AI-generated actions pending (Phase 6)
+        improvement_actions: [],
         status:              toColorStatus(m.performance?.status),
         gap:                 m.performance?.gap_pp ?? null,
         current_performance: buildPerfDetail(m.performance),
         opportunity_flag:    m.performance?.opportunity_flag,
         opportunity_dollars: m.performance?.opportunity_dollars,
+        denominator_count:   m.performance?.denominator_count || 1,
       })),
-    });
+    };
+    _payerDataCache[contractId] = payerData;
+    renderPayerCard(payerData);
   } catch (err) {
     hideLoading();
     console.error('loadPayerPerformance error:', err);
@@ -362,7 +412,12 @@ function renderPayerCard(data) {
     counts.green  ? `<span class="card-chip green">● ${counts.green} on track</span>` : '',
   ].join('');
 
-  const opp = financial.total_opportunity;
+  // Scale total opportunity by population ratio
+  const avgDenom = metrics.length
+    ? metrics.reduce((s, m) => s + (m.denominator_count || 1), 0) / metrics.length
+    : 1;
+  const scaledTotal = scaleOpportunity(financial.total_opportunity, avgDenom);
+  const opp = scaledTotal;
   const oppStr = opp >= 1000000 ? `$${(opp/1000000).toFixed(1)}M`
                : opp >= 1000    ? `$${Math.round(opp/1000)}K`
                : opp > 0        ? `$${opp.toLocaleString()}`
@@ -451,9 +506,16 @@ function buildCardDetail(m) {
     : `<div class="cd-block"><div class="cd-label">Current Performance</div>
        <div class="cd-val text-muted">No EHR data mapped to this metric yet.</div></div>`;
 
+  const scaledOpp = m.opportunity_dollars
+    ? scaleOpportunity(m.opportunity_dollars, m.denominator_count || 1)
+    : null;
+  const oppDisplay = scaledOpp >= 1000000 ? `$${(scaledOpp/1000000).toFixed(1)}M`
+                   : scaledOpp >= 1000    ? `$${Math.round(scaledOpp/1000)}K`
+                   : scaledOpp > 0        ? `$${scaledOpp.toLocaleString()}`
+                   : null;
   const flagHtml = m.opportunity_flag
     ? `<div class="cd-block"><div class="cd-label">Opportunity</div>
-       <div class="cd-val"><strong>${m.opportunity_flag}</strong>${m.opportunity_dollars ? ` — $${m.opportunity_dollars.toLocaleString()}` : ''}</div></div>`
+       <div class="cd-val"><strong>${m.opportunity_flag}</strong>${oppDisplay ? ` — ${oppDisplay}` : ''}</div></div>`
     : '';
 
   const actList = actionsArray(m.improvement_actions);

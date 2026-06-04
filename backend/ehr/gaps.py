@@ -46,23 +46,35 @@ def compute_status(gap_pp: float, target_operator: str) -> str:
         return "at_risk" if gap_pp >= -15 else "failing"
 
 
+BASE_DOLLARS_PER_PATIENT_PER_PP = 3  # baseline: ~$3/attributed member/pp (realistic VBC quality bonus)
+
+
 def compute_opportunity_dollars(
     gap_pp: float,
     denominator_count: int,
     financial_weight_pp: float | None,
     payment_model: str | None,
 ) -> float | None:
+    """Estimate opportunity dollars.
+
+    financial_weight_pp is a relative importance multiplier from the contract
+    (e.g. 2.0 = twice the financial weight), not a dollar value.
+    Applied on top of the base rate.
+    """
     if gap_pp >= 0:
         return 0.0
     abs_gap = abs(gap_pp)
-    if financial_weight_pp:
-        return round(abs_gap * denominator_count * financial_weight_pp, 0)
-    # Default estimate: $50/patient/pp for quality bonus
+
     if payment_model == "quality_bonus":
-        return round(abs_gap * denominator_count * 50, 0)
-    if payment_model == "quality_withhold":
-        return round(abs_gap * denominator_count * 30, 0)
-    return round(abs_gap * denominator_count * 40, 0)
+        base = BASE_DOLLARS_PER_PATIENT_PER_PP
+    elif payment_model == "quality_withhold":
+        base = BASE_DOLLARS_PER_PATIENT_PER_PP * 0.6
+    else:
+        base = BASE_DOLLARS_PER_PATIENT_PER_PP
+
+    # Apply relative weight as a multiplier if available
+    weight_multiplier = float(financial_weight_pp) if financial_weight_pp else 1.0
+    return round(abs_gap * denominator_count * base * weight_multiplier, 0)
 
 
 async def run_gap_computation(db: AsyncSession, performance: dict) -> dict:

@@ -1030,3 +1030,109 @@ table.parse-table tbody tr:hover { background: var(--slate-50); }
   color: var(--teal-600);
   background: var(--teal-50);
 }
+
+/* ── Population scaler ───────────────────────────────────────────────────── */
+.population-scaler {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+  padding: 10px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+.population-scaler label {
+  font-weight: 500;
+  color: var(--text-body);
+  white-space: nowrap;
+}
+.population-scaler input {
+  width: 110px;
+  padding: 4px 8px;
+  font-size: 0.82rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text-body);
+  font-family: var(--font);
+}
+.population-hint {
+  color: var(--text-faint);
+  font-size: 0.75rem;
+}
+
+/* ── Login overlay ───────────────────────────────────────────────────────── */
+.login-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--navy-900);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+.login-box {
+  background: var(--navy-800);
+  border: 1px solid var(--navy-700);
+  border-radius: var(--radius-lg);
+  padding: 48px 40px;
+  width: 100%;
+  max-width: 380px;
+  text-align: center;
+  box-shadow: var(--shadow-lg);
+}
+.login-logo {
+  height: 40px;
+  margin-bottom: 16px;
+}
+.login-title {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.login-sub {
+  font-size: 0.82rem;
+  color: var(--slate-400);
+  margin-bottom: 28px;
+}
+.login-input {
+  width: 100%;
+  padding: 10px 14px;
+  font-size: 0.9rem;
+  background: var(--navy-900);
+  border: 1px solid var(--navy-700);
+  border-radius: var(--radius-sm);
+  color: #fff;
+  font-family: var(--font);
+  margin-bottom: 10px;
+  outline: none;
+}
+.login-input:focus {
+  border-color: var(--teal-500);
+}
+.login-btn {
+  width: 100%;
+  padding: 10px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  background: var(--teal-500);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.login-btn:hover { background: var(--teal-600); }
+.login-error {
+  font-size: 0.78rem;
+  color: var(--red-mid);
+  margin-bottom: 8px;
+}
