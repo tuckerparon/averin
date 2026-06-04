@@ -100,11 +100,8 @@ async def run_pipeline(pdf_bytes: bytes, filename: str, payer_name: str) -> dict
     if len(contract_text) < 100:
         raise ValueError("Could not extract text — file may be a scanned image PDF")
 
-    # Step 2: Extract metrics
-    from ehr.mapping import infer_performance_key
+    # Step 2: Extract metrics — performance_key resolved at sync time via metric_mappings table
     metrics = extract_metrics_with_llm(contract_text)
-    for m in metrics:
-        m["performance_key"] = infer_performance_key(m.get("metric_name", ""))
 
     # Step 3: Chunk and embed contract text
     chunks = chunk_contract_text(contract_text)
