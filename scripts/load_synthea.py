@@ -1,16 +1,51 @@
 #!/usr/bin/env python3
-"""Load Synthea FHIR bundles into IRIS, resolving internal references."""
+"""Load Synthea FHIR bundles into Azure Health Data Services, resolving internal references."""
 
 import json
+import os
+import time
 import requests
 from pathlib import Path
+from dotenv import load_dotenv
 
-FHIR_BASE = "http://localhost:52773/csp/healthshare/averin/fhir/r4"
-AUTH = ("_SYSTEM", "AVERIN_is2026")
-HEADERS = {
-    "Content-Type": "application/fhir+json",
-    "Accept": "application/fhir+json",
-}
+load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
+
+FHIR_BASE = os.environ["AZURE_FHIR_URL"].rstrip("/")
+TENANT_ID = os.environ["AZURE_FHIR_TENANT_ID"]
+CLIENT_ID = os.environ["AZURE_FHIR_CLIENT_ID"]
+CLIENT_SECRET = os.environ["AZURE_FHIR_CLIENT_SECRET"]
+
+_token_cache: dict = {"token": None, "expires_at": 0}
+
+
+def get_token() -> str:
+    """Fetch Azure AD access token for FHIR scope."""
+    now = time.time()
+    if _token_cache["token"] and now < _token_cache["expires_at"] - 60:
+        return _token_cache["token"]
+    url = f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token"
+    resp = requests.post(url, data={
+        "grant_type": "client_credentials",
+        "client_id": CLIENT_ID,
+        "client_secret": CLIENT_SECRET,
+        "scope": f"{FHIR_BASE}/.default",
+    })
+    resp.raise_for_status()
+    result = resp.json()
+    _token_cache["token"] = result["access_token"]
+    _token_cache["expires_at"] = now + result.get("expires_in", 3600)
+    return _token_cache["token"]
+
+
+def get_headers() -> dict:
+    return {
+        "Authorization": f"Bearer {get_token()}",
+        "Content-Type": "application/fhir+json",
+        "Accept": "application/fhir+json",
+    }
+
+
+HEADERS = {}  # populated dynamically via get_headers()
 
 PRIORITY_TYPES = ["Organization", "Location", "Practitioner", "PractitionerRole", "Patient"]
 SKIP_TYPES = ["Provenance"]
@@ -61,10 +96,11 @@ def post_resource(resource: dict) -> bool:
     rid = resource.get("id")
     if not rtype:
         return False
+    headers = get_headers()
     if rid:
-        resp = requests.put(f"{FHIR_BASE}/{rtype}/{rid}", json=resource, auth=AUTH, headers=HEADERS)
+        resp = requests.put(f"{FHIR_BASE}/{rtype}/{rid}", json=resource, headers=headers)
     else:
-        resp = requests.post(f"{FHIR_BASE}/{rtype}", json=resource, auth=AUTH, headers=HEADERS)
+        resp = requests.post(f"{FHIR_BASE}/{rtype}", json=resource, headers=headers)
     if resp.status_code not in (200, 201):
         print(f"  WARN {resp.status_code} {rtype}/{rid}: {resp.text[:150]}")
         return False
