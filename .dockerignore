@@ -1,0 +1,14 @@
+.git
+.env
+.env.*
+__pycache__
+**/__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+backend/.pytest_cache
+tests/
+docs/
+*.md
+.cursor/
+node_modules/

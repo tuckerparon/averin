@@ -45,9 +45,9 @@ def _dob_range(min_age: int, max_age: int) -> tuple[str, str]:
 
 async def bp_control() -> dict:
     """Hypertension: BP Control (<140/90). HEDIS CBP. ICD-10: I10. LOINC: 8480-6, 8462-4."""
-    # Try both with and without system prefix to handle Synthea's coding
+    # Synthea stores conditions as SNOMED CT; include ICD-10 for real-world EHRs
     patients = await get_all_pages("Condition", {
-        "code": "I10",
+        "code": "http://snomed.info/sct|59621000,http://snomed.info/sct|38341003,http://hl7.org/fhir/sid/icd-10-cm|I10",
         "_count": 1000,
     })
     patient_ids = list({
@@ -100,7 +100,11 @@ async def bp_control() -> dict:
 
 async def diabetes_a1c_control() -> dict:
     """Diabetes: A1C Control (<8%). HEDIS HbA1c. ICD-10: E11. LOINC: 4548-4."""
-    conditions = await get_all_pages("Condition", {"code": "E11", "_count": 1000})
+    # Synthea stores diabetes as SNOMED CT; include ICD-10 for real-world EHRs
+    conditions = await get_all_pages("Condition", {
+        "code": "http://snomed.info/sct|44054006,http://snomed.info/sct|73211009,http://hl7.org/fhir/sid/icd-10-cm|E11",
+        "_count": 1000,
+    })
     patient_ids = list({
         c.get("subject", {}).get("reference", "").split("/")[-1]
         for c in conditions
