@@ -15,6 +15,7 @@ services:
     volumes:
       - ./backend:/app
       - ./tests:/tests
+      - ./contracts:/contracts
 
   db:
     image: pgvector/pgvector:pg16
