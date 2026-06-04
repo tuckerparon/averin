@@ -16,6 +16,8 @@ services:
       - ./backend:/app
       - ./tests:/tests
       - ./contracts:/contracts
+      - ./frontend/static:/static
+      - ./frontend/templates:/templates
 
   db:
     image: pgvector/pgvector:pg16

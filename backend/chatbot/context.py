@@ -4,12 +4,12 @@
 # Date generated: 2026-06-03
 #
 # Reviewer: Tucker Paron
-# Review date: _______________
+# Review date: 2026-06-04
 # Changes made during review:
-#   -
-# Comments:
+#   - Nones
+# Comments: None
 #
-# Sign-off: _______________
+# Sign-off: Tucker Paron
 # -----------------------------------------------------------
 """Chatbot context builder and system prompt — ported from app.py."""
 

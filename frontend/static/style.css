@@ -976,3 +976,57 @@ table.parse-table tbody tr:hover { background: var(--slate-50); }
 .text-muted { color: var(--text-muted); }
 .text-small { font-size: 0.82rem; }
 .fw-600     { font-weight: 600; }
+
+/* ── Beta badge ──────────────────────────────────────────────────────────── */
+.beta-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 7px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: #fff;
+  background: var(--teal-500, #0F9080);
+  border-radius: 4px;
+  vertical-align: middle;
+  position: relative;
+  top: -2px;
+}
+
+/* ── Demo contracts ──────────────────────────────────────────────────────── */
+.demo-contracts {
+  margin-top: 14px;
+  padding: 14px 16px 16px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.demo-label {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin: 0;
+  white-space: nowrap;
+}
+.demo-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.demo-btn {
+  padding: 5px 14px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--slate-600);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.demo-btn:hover {
+  border-color: var(--teal-500);
+  color: var(--teal-600);
+  background: var(--teal-50);
+}

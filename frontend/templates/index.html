@@ -15,7 +15,7 @@
     <div class="header-inner">
       <div class="brand">
         <img src="/static/logo.png" alt="Averin Insight™" class="brand-logo" />
-        <span class="brand-tm">™</span>
+        <span class="beta-badge">BETA</span>
       </div>
       <div class="header-right">
         <span class="header-tag">Value-Based Care Intelligence</span>
@@ -49,6 +49,17 @@
               <p class="drop-title">Drag &amp; drop VBC contracts here</p>
               <p class="drop-sub">or <label for="fileInput" class="file-label">click to browse</label> &nbsp;·&nbsp; PDF files only &nbsp;·&nbsp; Multiple files accepted</p>
               <input type="file" id="fileInput" accept=".pdf" multiple style="display:none" />
+            </div>
+
+            <!-- Demo contracts -->
+            <div class="demo-contracts">
+              <p class="demo-label">Or load a sample contract:</p>
+              <div class="demo-buttons">
+                <button class="demo-btn" onclick="loadDemoContract('aetna')">Aetna</button>
+                <button class="demo-btn" onclick="loadDemoContract('humana')">Humana</button>
+                <button class="demo-btn" onclick="loadDemoContract('unitedhealth')">UnitedHealth</button>
+                <button class="demo-btn" onclick="loadDemoContract('meridian')">Meridian</button>
+              </div>
             </div>
           </div>
 

@@ -7,10 +7,11 @@
 # Review date: 2026-06-04
 # Changes made during review:
 #   - None
-# Comments: None
+# Comments: Using Gemini for MVP because HSIL Azure code doesn't work and thus we have no quota.
 #
 # Sign-off: Tucker Paron
 # -----------------------------------------------------------
+
 """
 Contract ingestion pipeline:
   PDF -> Azure Document Intelligence -> Gemini (temp) / Azure OpenAI -> PostgreSQL
@@ -49,8 +50,9 @@ def _get_gemini_client():
 def extract_text_from_pdf(pdf_bytes: bytes) -> str:
     """Use Azure Document Intelligence to extract text from a PDF."""
     client = _get_doc_client()
+    # prebuilt-read is significantly faster than prebuilt-layout for text-only extraction
     poller = client.begin_analyze_document(
-        "prebuilt-layout",
+        "prebuilt-read",
         body=pdf_bytes,
         content_type="application/octet-stream",
     )
@@ -64,12 +66,12 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> str:
 
 def extract_metrics_with_llm(contract_text: str) -> list[dict]:
     """Use Gemini to extract metrics from contract text (temp until Azure OpenAI quota approved)."""
-    if len(contract_text) > 120_000:
-        contract_text = contract_text[:120_000]
+    if len(contract_text) > 80_000:
+        contract_text = contract_text[:80_000]
 
     client = _get_gemini_client()
     prompt = PARSE_PROMPT.format(contract_text=contract_text)
-    response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
+    response = client.models.generate_content(model="gemini-2.5-flash-lite", contents=prompt)
     raw = response.text.strip()
     cleaned = clean_llm_json(raw)
 
