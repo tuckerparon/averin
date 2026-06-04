@@ -1068,21 +1068,21 @@ table.parse-table tbody tr:hover { background: var(--slate-50); }
 .login-overlay {
   position: fixed;
   inset: 0;
-  background: var(--navy-900);
+  background: var(--bg);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 9999;
 }
 .login-box {
-  background: var(--navy-800);
-  border: 1px solid var(--navy-700);
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 48px 40px;
   width: 100%;
   max-width: 380px;
   text-align: center;
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--shadow-md);
 }
 .login-logo {
   height: 40px;
@@ -1091,7 +1091,7 @@ table.parse-table tbody tr:hover { background: var(--slate-50); }
 .login-title {
   font-size: 1.2rem;
   font-weight: 700;
-  color: #fff;
+  color: var(--text);
   margin-bottom: 6px;
   display: flex;
   align-items: center;
@@ -1100,17 +1100,17 @@ table.parse-table tbody tr:hover { background: var(--slate-50); }
 }
 .login-sub {
   font-size: 0.82rem;
-  color: var(--slate-400);
+  color: var(--text-muted);
   margin-bottom: 28px;
 }
 .login-input {
   width: 100%;
   padding: 10px 14px;
   font-size: 0.9rem;
-  background: var(--navy-900);
-  border: 1px solid var(--navy-700);
+  background: var(--bg);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  color: #fff;
+  color: var(--text-body);
   font-family: var(--font);
   margin-bottom: 10px;
   outline: none;
