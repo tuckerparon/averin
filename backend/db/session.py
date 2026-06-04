@@ -4,12 +4,12 @@
 # Date generated: 2026-06-03
 #
 # Reviewer: Tucker Paron
-# Review date: _______________
+# Review date: 2026-06-04
 # Changes made during review:
-#   -
-# Comments:
+#   - Added docstrings.
+# Comments: None
 #
-# Sign-off: _______________
+# Sign-off: Tucker Paron
 # -----------------------------------------------------------
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
