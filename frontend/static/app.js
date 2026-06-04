@@ -598,6 +598,7 @@ async function sendChatMessage() {
         message:    msg,
         history:    chatHistory.slice(-8),
         session_id: currentPayerId,
+        population: getPopulation(),
       }),
     });
     const data = await res.json();

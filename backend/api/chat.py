@@ -36,12 +36,13 @@ class ChatRequest(BaseModel):
     message: str
     session_id: str | None = None
     history: list[dict] | None = None
+    population: int = 10_000
 
 
 @router.post("")
 async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
     """Accept a chat message, build DB context, and return a Gemini response."""
-    context = await build_chat_context(db)
+    context = await build_chat_context(db, population=request.population)
     system_text = CHAT_SYSTEM.format(context=context)
 
     # Build conversation including history

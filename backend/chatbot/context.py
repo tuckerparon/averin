@@ -39,8 +39,27 @@ Guidelines:
 """
 
 
-async def build_chat_context(db: AsyncSession) -> str:
-    """Query DB and build a PHI-free performance summary for the LLM context window."""
+def _scale(dollars: float, denominator: int, population: int) -> float:
+    """Scale raw opportunity dollars from test population to real population size."""
+    if not dollars or not denominator:
+        return 0.0
+    return dollars * (population / denominator)
+
+
+def _fmt(dollars: float) -> str:
+    if dollars >= 1_000_000:
+        return f"${dollars/1_000_000:.1f}M"
+    if dollars >= 1_000:
+        return f"${dollars/1_000:.0f}K"
+    return f"${dollars:,.0f}"
+
+
+async def build_chat_context(db: AsyncSession, population: int = 10_000) -> str:
+    """Query DB and build a PHI-free performance summary for the LLM context window.
+
+    population: attributed member count used to scale opportunity dollars,
+                matching what the UI shows. Defaults to 10,000.
+    """
     contracts_result = await db.execute(
         select(Contract).order_by(Contract.payer_name)
     )
@@ -49,7 +68,9 @@ async def build_chat_context(db: AsyncSession) -> str:
     if not contracts:
         return "No contracts have been loaded yet."
 
-    lines = ["CURRENT PERFORMANCE DATA BY PAYER:"]
+    lines = [
+        f"CURRENT PERFORMANCE DATA BY PAYER (opportunity $ scaled to {population:,} attributed members):"
+    ]
     total_opportunity = 0.0
 
     for contract in contracts:
@@ -63,25 +84,27 @@ async def build_chat_context(db: AsyncSession) -> str:
             continue
 
         payer_opportunity = sum(
-            (g.opportunity_dollars or 0) for _, g in rows if g
+            _scale(g.opportunity_dollars or 0, g.denominator_count or 1, population)
+            for _, g in rows if g
         )
         total_opportunity += payer_opportunity
 
         lines.append(f"\nPAYER: {contract.payer_name}")
         lines.append(f"  Payment model: {contract.payment_model or 'not specified'}")
-        lines.append(f"  Total opportunity: ${payer_opportunity:,.0f}")
+        lines.append(f"  Total opportunity: {_fmt(payer_opportunity)}")
         lines.append("  Metrics:")
 
         for metric, gap in rows:
             if gap and gap.rate is not None:
+                scaled_opp = _scale(gap.opportunity_dollars or 0, gap.denominator_count or 1, population)
                 status_str = gap.status or "unknown"
                 flag_str = f" [{gap.opportunity_flag}]" if gap.opportunity_flag else ""
-                opp_str = f" ${gap.opportunity_dollars:,.0f} opportunity" if gap.opportunity_dollars else ""
+                opp_str = f" {_fmt(scaled_opp)} opportunity" if scaled_opp else ""
                 lines.append(
                     f"    - {metric.measure_name}: "
                     f"target {metric.target_operator or '>='}{metric.target_value or '?'}%, "
                     f"actual {gap.rate}% "
-                    f"({gap.numerator_count} of {gap.denominator_count} patients), "
+                    f"({gap.numerator_count} of {gap.denominator_count} patients in test data), "
                     f"gap {gap.gap_pp:+.1f}pp — {status_str}{flag_str}{opp_str}"
                 )
             else:
@@ -91,6 +114,5 @@ async def build_chat_context(db: AsyncSession) -> str:
                     f"— no EHR data yet"
                 )
 
-    lines.append(f"\nTOTAL OPPORTUNITY ACROSS ALL PAYERS: ${total_opportunity:,.0f}")
-    lines.append("(Note: opportunity figures are based on synthetic test population — scale proportionally for actual attributed member count)")
+    lines.append(f"\nTOTAL OPPORTUNITY ACROSS ALL PAYERS: {_fmt(total_opportunity)}")
     return "\n".join(lines)

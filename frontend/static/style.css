@@ -1085,8 +1085,8 @@ table.parse-table tbody tr:hover { background: var(--slate-50); }
   box-shadow: var(--shadow-md);
 }
 .login-logo {
-  height: 40px;
-  margin-bottom: 16px;
+  height: 80px;
+  margin-bottom: 20px;
 }
 .login-title {
   font-size: 1.2rem;
