@@ -11,6 +11,12 @@
   }
 })();
 
+function toggleLoginPw(btn) {
+  const input = document.getElementById('loginPassword');
+  input.type = input.type === 'password' ? 'text' : 'password';
+  btn.style.opacity = input.type === 'text' ? '1' : '0.5';
+}
+
 async function submitLogin(e) {
   e.preventDefault();
   const pw = document.getElementById('loginPassword').value;
@@ -31,7 +37,7 @@ async function submitLogin(e) {
   }
 }
 
-const API_BASE = 'http://localhost:8000';
+const API_BASE = '';
 
 const API = {
   contracts:      `${API_BASE}/contracts`,

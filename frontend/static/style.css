@@ -1106,20 +1106,38 @@ table.parse-table tbody tr:hover { background: var(--slate-50); }
   color: var(--text-muted);
   margin-bottom: 28px;
 }
+.login-input-wrap {
+  position: relative;
+  margin-bottom: 10px;
+}
 .login-input {
   width: 100%;
-  padding: 10px 14px;
+  padding: 10px 40px 10px 14px;
   font-size: 0.9rem;
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--text-body);
   font-family: var(--font);
-  margin-bottom: 10px;
   outline: none;
+  box-sizing: border-box;
 }
 .login-input:focus {
   border-color: var(--teal-500);
+}
+.login-eye {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  opacity: 0.5;
+  padding: 2px;
+  display: flex;
+  align-items: center;
 }
 .login-btn {
   width: 100%;
